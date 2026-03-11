@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html.dark {
+  color-scheme: dark;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slideIn { animation: slideIn 0.2s ease-out; }
+
+@keyframes fadeIn {
+  from { opacity: 0; } to { opacity: 1; }
+}
+.animate-fadeIn { animation: fadeIn 0.15s ease-out; }
+
+@layer utilities {
+  .animate-fadeIn {
+    animation: fadeIn 0.25s ease forwards;
+  }
+  .animate-fadeInUp {
+    animation: fadeInUp 0.35s ease forwards;
+  }
+  .animate-pulse-slow {
+    animation: pulse 2.5s cubic-bezier(0.4,0,0.6,1) infinite;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

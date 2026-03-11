@@ -1,0 +1,25 @@
+{
+  "name": "cortex-backend-api",
+  "version": "2.0.0",
+  "description": "Backend API for AI Calling + CRM System (n8n-free orchestration)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "api",
+    "backend",
+    "multi-tenant",
+    "crm"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "node-cron": "^3.0.3",
+    "pg": "^8.18.0"
+  }
+}

@@ -1,0 +1,58 @@
+# ── Node / npm ────────────────────────────────────────────
+**/node_modules/
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
+**/package-lock.json
+
+# ── Next.js build output ──────────────────────────────────
+**/.next/
+**/out/
+**/build/
+**/dist/
+
+# ── Environment variables (NEVER commit secrets) ─────────
+**/.env
+**/.env.local
+**/.env.production
+**/.env.development
+**/.env*.local
+**/env.template.local
+
+# ── Vercel ────────────────────────────────────────────────
+**/.vercel/
+
+# ── TypeScript ────────────────────────────────────────────
+**/*.tsbuildinfo
+**/next-env.d.ts
+
+# ── Logs ──────────────────────────────────────────────────
+**/logs/
+**/*.log
+
+# ── OS / Editor ───────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Misc ──────────────────────────────────────────────────
+.cache/
+.parcel-cache/
+.turbo/
+*.pem
+*.zip
+
+# ── Cursor IDE workspace files ────────────────────────────
+.cursor/
+
+# ── Keep these (explicit includes override ignores above) ─
+!CORTEXFLOW.md
+!backend/
+!crm/
+!landing/
