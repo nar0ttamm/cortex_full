@@ -71,7 +71,8 @@ export const conversationEngine = {
       fullResponse += text;
 
       while (true) {
-        const seps = ['. ', '? ', '! ', '\n'];
+        // Prefer natural breaks; include Hindi danda for Hinglish.
+        const seps = ['. ', '? ', '! ', '\n', '। ', '।'];
         let bestIdx = -1;
         let bestLen = 0;
         for (const sep of seps) {

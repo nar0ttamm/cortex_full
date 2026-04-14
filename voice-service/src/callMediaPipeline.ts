@@ -29,11 +29,30 @@ interface Runtime {
   conversationHistory: Message[];
   generation: number;
   aiSpeaking: boolean;
+  /** While true, do not send forked PCM to Deepgram (prevents TTS→echo→STT loops). */
+  blockSttAudio: boolean;
+  /** Ignore PCM until this time (ms epoch) after TTS for residual echo. */
+  sttGateUntil: number;
   processingUserTurn: boolean;
   ended: boolean;
+  lastUserNorm: string;
+  lastUserAt: number;
 }
 
 const pipelines = new Map<string, Runtime>();
+
+/** After TTS + playback, ignore forked audio briefly so echo does not become a fake “user” turn. */
+const POST_TTS_GATE_MS = parseInt(process.env.VOICE_STT_POST_TTS_MS || '700', 10);
+/** Deepgram sometimes emits duplicate finals; ignore repeats within this window. */
+const USER_UTTERANCE_DEDUPE_MS = parseInt(process.env.VOICE_STT_DEDUPE_MS || '2800', 10);
+
+function normalizeUtterance(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s?.!।]/gu, '')
+    .trim();
+}
 
 async function writeTempWav(callId: string, seq: number, wav: Buffer): Promise<string> {
   const safe = callId.replace(/[^a-fA-F0-9-]/g, '');
@@ -46,22 +65,28 @@ async function writeTempWav(callId: string, seq: number, wav: Buffer): Promise<s
 async function speakText(callId: string, rt: Runtime, text: string, seqRef: { n: number }): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed) return;
+  rt.blockSttAudio = true;
   const gen = rt.generation;
-  const pcm = await synthesizeTelephonyPcm8k(trimmed);
-  if (gen !== rt.generation) return;
-  const wav = pcm16leMonoToWav(pcm, 8000);
-  seqRef.n += 1;
-  const fp = await writeTempWav(callId, seqRef.n, wav);
-  rt.aiSpeaking = true;
   try {
-    await uuidBroadcast(callId, fp, 'aleg');
-  } catch (e) {
-    console.warn(`[pipeline:${callId}] uuid_broadcast`, (e as Error).message);
+    const pcm = await synthesizeTelephonyPcm8k(trimmed);
+    if (gen !== rt.generation) return;
+    const wav = pcm16leMonoToWav(pcm, 8000);
+    seqRef.n += 1;
+    const fp = await writeTempWav(callId, seqRef.n, wav);
+    rt.aiSpeaking = true;
+    try {
+      await uuidBroadcast(callId, fp, 'aleg');
+    } catch (e) {
+      console.warn(`[pipeline:${callId}] uuid_broadcast`, (e as Error).message);
+    }
+    const ms = Math.max(500, Math.min(30000, (pcm.length / 2 / 8000) * 1000 + 250));
+    await new Promise<void>(resolve => setTimeout(resolve, ms));
+    rt.aiSpeaking = false;
+    void fs.unlink(fp).catch(() => {});
+  } finally {
+    rt.blockSttAudio = false;
+    rt.sttGateUntil = Date.now() + POST_TTS_GATE_MS;
   }
-  const ms = Math.max(500, Math.min(30000, (pcm.length / 2 / 8000) * 1000 + 250));
-  await new Promise<void>(resolve => setTimeout(resolve, ms));
-  rt.aiSpeaking = false;
-  void fs.unlink(fp).catch(() => {});
 }
 
 /**
@@ -98,8 +123,12 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     conversationHistory,
     generation: 0,
     aiSpeaking: false,
+    blockSttAudio: true,
+    sttGateUntil: 0,
     processingUserTurn: false,
     ended: false,
+    lastUserNorm: '',
+    lastUserAt: 0,
   };
 
   const stt = speechRecognition.createStreamingSession({
@@ -108,6 +137,15 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
       if (!isFinal) return;
       const cleaned = text.trim();
       if (!cleaned) return;
+      const norm = normalizeUtterance(cleaned);
+      const now = Date.now();
+      if (norm && norm === rt.lastUserNorm && now - rt.lastUserAt < USER_UTTERANCE_DEDUPE_MS) {
+        return;
+      }
+      if (norm) {
+        rt.lastUserNorm = norm;
+        rt.lastUserAt = now;
+      }
       if (rt.processingUserTurn) return;
       rt.processingUserTurn = true;
       try {
@@ -152,6 +190,8 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     onSpeechStart: () => {
       if (rt.ended) return;
       rt.generation += 1;
+      rt.blockSttAudio = false;
+      rt.sttGateUntil = 0;
       void uuidBreak(callId).catch(() => {});
       rt.aiSpeaking = false;
     },
@@ -159,7 +199,11 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
   });
 
   rt.stt = stt;
-  rt.unregister = registerAudioConsumer(callId, buf => stt.write(buf));
+  rt.unregister = registerAudioConsumer(callId, buf => {
+    if (rt.ended) return;
+    if (rt.blockSttAudio || Date.now() < rt.sttGateUntil) return;
+    stt.write(buf);
+  });
 
   try {
     const wsUrl = buildAudioIngressUrl(callId);

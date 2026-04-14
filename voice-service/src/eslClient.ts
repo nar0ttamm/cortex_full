@@ -97,6 +97,7 @@ export async function getEslConnection(): Promise<EslConnection> {
 
 /**
  * originate {vars}sofia/gateway/<gateway>/<e164> &park()
+ * Park holds the answered leg open (no bridge) while we uuid_broadcast / uuid_audio_fork for AI.
  */
 export async function originatePark(params: {
   callUuid: string;
