@@ -76,12 +76,19 @@ async function getPool(): Promise<Pool> {
         if (isPooler && ssl && typeof ssl === 'object') {
           ssl = { ...ssl, servername: host };
         }
-      } else if (!isPooler) {
+      } else if (isPooler) {
+        // Do not pass hostname through to pg on IPv4-only VMs: DNS may prefer AAAA → ENETUNREACH.
+        throw new Error(
+          `Could not resolve "${host}" to IPv4. Check VM DNS/outbound UDP 53 and DATABASE_URL (Session pooler URI).`
+        );
+      } else {
         throw new Error(
           `No IPv4 address for "${host}". Use Supabase pooler host (*.pooler.supabase.com) in DATABASE_URL.`
         );
       }
     }
+
+    console.log('[callStorage] postgres connect host:', connectHost === host ? host : `${connectHost} (SNI ${host})`);
 
     return new Pool({
       user: clientConfig.user,
