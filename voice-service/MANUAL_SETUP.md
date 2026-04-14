@@ -98,7 +98,8 @@ If `uuid_audio_fork` returns **Command not found** in `cortex_voice` logs, the i
 2. **Stop and remove** the old container: `docker stop freeswitch && docker rm freeswitch` (frees port **8021**).
 3. **Run** the Drachtio image with the **same** ports your trunk needs, e.g. `-p 8021:8021 -p 5060:5060/tcp -p 5060:5060/udp` and mount or `docker cp` your gateway files back into `/etc/freeswitch/...`.
 4. Match **`FREESWITCH_ESL_PASSWORD`** in `voice-service/.env` to **`event_socket.conf.xml`** inside the container (often `ClueCon` on stock configs).
-5. **`pm2 restart cortex_voice`**, then run **`bash scripts/verify-ai-stack.sh`** from `voice-service` on the VM.
+5. **`pm2 restart cortex_voice`**, then run **`bash scripts/verify-ai-stack.sh`** from `voice-service` on the VM.  
+   If Docker returns **permission denied**, run **`sudo usermod -aG docker "$USER"`**, log out/in, or run **`sudo bash scripts/verify-ai-stack.sh`**.
 
 ---
 
