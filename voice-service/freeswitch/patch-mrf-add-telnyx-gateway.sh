@@ -52,59 +52,81 @@ export TELNYX_SIP_USERNAME TELNYX_SIP_PASSWORD
 python3 <<'PY'
 import os
 import sys
-from xml.sax.saxutils import escape
+import xml.etree.ElementTree as ET
 
-user = escape(os.environ["TELNYX_SIP_USERNAME"])
-pw = escape(os.environ["TELNYX_SIP_PASSWORD"])
 path = os.environ["MRF_TMP"]
+user = os.environ["TELNYX_SIP_USERNAME"]
+pw = os.environ["TELNYX_SIP_PASSWORD"]
 
-content = open(path, encoding="utf-8").read()
-if 'gateway name="telnyx"' in content:
-    print("Already patched: telnyx gateway present in mrf.xml — nothing to do.")
-    print("If `sofia status gateway` still does not list telnyx, delete that <gateways>...</gateways> block from mrf.xml and run this script again.")
-    sys.exit(0)
 
-# Insert after </settings> for profile drachtio_mrf only (first </settings> in file can be wrong profile).
-profile_markers = (
-    '<profile name="drachtio_mrf">',
-    "<profile name='drachtio_mrf'>",
-)
-start = -1
-for marker in profile_markers:
-    start = content.find(marker)
-    if start != -1:
-        break
-if start == -1:
-    print("ERROR: no <profile name=\"drachtio_mrf\"> in mrf.xml", file=sys.stderr)
+def local_tag(tag: str) -> str:
+    return tag.split("}")[-1]
+
+
+def find_drachtio_profile(root):
+    for el in root.iter():
+        if local_tag(el.tag) == "profile" and el.get("name") == "drachtio_mrf":
+            return el
+    return None
+
+
+def ensure_gateways(profile: ET.Element) -> ET.Element:
+    for child in list(profile):
+        if local_tag(child.tag) == "gateways":
+            return child
+    gw_root = ET.Element("gateways")
+    # Insert after <settings> (same sibling order FS expects: domains, settings, gateways, …)
+    for i, child in enumerate(list(profile)):
+        if local_tag(child.tag) == "settings":
+            profile.insert(i + 1, gw_root)
+            return gw_root
+    profile.append(gw_root)
+    return gw_root
+
+
+def remove_telnyx(gateways_el: ET.Element) -> None:
+    for child in list(gateways_el):
+        if local_tag(child.tag) == "gateway" and child.get("name") == "telnyx":
+            gateways_el.remove(child)
+
+
+def add_telnyx_gateway(gateways_el: ET.Element) -> None:
+    gw = ET.SubElement(gateways_el, "gateway", {"name": "telnyx"})
+    params = [
+        ("username", user),
+        ("password", pw),
+        ("realm", "sip.telnyx.com"),
+        ("proxy", "sip.telnyx.com"),
+        ("register-proxy", "sip.telnyx.com"),
+        ("register-transport", "udp"),
+        ("register", "true"),
+        ("caller-id-in-from", "true"),
+    ]
+    for name, val in params:
+        ET.SubElement(gw, "param", {"name": name, "value": val})
+
+
+# Do NOT use string find("</settings>"): Drachtio mrf.xml has long <!-- --> blocks; a comment can
+# contain the text "</settings>", so naive insertion puts <gateways> inside the comment. FS then
+# loads 0 gateways while reloadxml still returns +OK.
+try:
+    tree = ET.parse(path)
+except ET.ParseError as e:
+    print(f"ERROR: mrf.xml is not valid XML ({e}). Restore from image or git and retry.", file=sys.stderr)
     sys.exit(1)
 
-rest = content[start:]
-idx_rel = rest.find("</settings>")
-if idx_rel == -1:
-    print("ERROR: no </settings> after drachtio_mrf profile in mrf.xml", file=sys.stderr)
+root = tree.getroot()
+profile = find_drachtio_profile(root)
+if profile is None:
+    print('ERROR: no <profile name="drachtio_mrf"> in mrf.xml', file=sys.stderr)
     sys.exit(1)
 
-idx = start + idx_rel
-idx_end = idx + len("</settings>")
+gateways_el = ensure_gateways(profile)
+remove_telnyx(gateways_el)
+add_telnyx_gateway(gateways_el)
 
-# Telnyx credentials trunk (see Telnyx “FreeSWITCH: Credentials Trunk”) — realm + register + auth.
-# Drachtio MRF image has ONLY profile `drachtio_mrf` in sip_profiles/mrf.xml (no `external/` tree like stock FS).
-block = f"""    <gateways>
-      <gateway name="telnyx">
-        <param name="username" value="{user}"/>
-        <param name="password" value="{pw}"/>
-        <param name="realm" value="sip.telnyx.com"/>
-        <param name="proxy" value="sip.telnyx.com"/>
-        <param name="register-proxy" value="sip.telnyx.com"/>
-        <param name="register-transport" value="udp"/>
-        <param name="register" value="true"/>
-        <param name="caller-id-in-from" value="true"/>
-      </gateway>
-    </gateways>"""
-
-newc = content[:idx_end] + "\n" + block + content[idx_end:]
-open(path, "w", encoding="utf-8").write(newc)
-print("Patched mrf.xml (inserted gateways after </settings>).")
+tree.write(path, encoding="utf-8", xml_declaration=True)
+print("Patched mrf.xml (ElementTree: <gateways> under drachtio_mrf, not inside comments).")
 PY
 
 d cp "${TMP}" "${CTR}:${CONF_IN}"
