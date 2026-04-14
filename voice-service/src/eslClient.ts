@@ -96,19 +96,40 @@ export async function getEslConnection(): Promise<EslConnection> {
 }
 
 /**
- * originate {vars}sofia/gateway/<gateway>/<e164> &park()
- * Park holds the answered leg open (no bridge) while we uuid_broadcast / uuid_audio_fork for AI.
+ * Outbound originate: answered leg runs a dialplan app until we drive media via ESL.
+ *
+ * - Default `FREESWITCH_ORIGINATE_APP=playback(silence_stream://-1)` keeps RTP in an active
+ *   “conversation-ready” state (not parked). We `uuid_break` before the first TTS.
+ * - Set `FREESWITCH_ORIGINATE_APP=park()` to use classic park (uuid_broadcast still works on many builds).
+ *
+ * Extra chan vars: `FREESWITCH_ORIGINATE_EXTRA_VARS` (comma-separated), e.g. `ignore_early_media=true`
  */
+const DEFAULT_ORIGINATE_APP = 'playback(silence_stream://-1)';
+
+function buildOriginateArg(params: {
+  callUuid: string;
+  destinationE164: string;
+  callerIdE164: string;
+  gatewayName: string;
+}): string {
+  const { callUuid, destinationE164, callerIdE164, gatewayName } = params;
+  const dial = `sofia/gateway/${gatewayName}/${destinationE164}`;
+  const extra = (process.env.FREESWITCH_ORIGINATE_EXTRA_VARS || 'ignore_early_media=true').trim();
+  const base = `origination_uuid=${callUuid},origination_caller_id_number=${callerIdE164}`;
+  const varInner = extra ? `${base},${extra}` : base;
+  const vars = `{${varInner}}`;
+  const appRaw = (process.env.FREESWITCH_ORIGINATE_APP || DEFAULT_ORIGINATE_APP).trim();
+  const app = appRaw.startsWith('&') ? appRaw.slice(1).trim() : appRaw;
+  return `${vars}${dial} &${app}`;
+}
+
 export async function originatePark(params: {
   callUuid: string;
   destinationE164: string;
   callerIdE164: string;
   gatewayName: string;
 }): Promise<string> {
-  const { callUuid, destinationE164, callerIdE164, gatewayName } = params;
-  const dial = `sofia/gateway/${gatewayName}/${destinationE164}`;
-  const vars = `{origination_uuid=${callUuid},origination_caller_id_number=${callerIdE164}}`;
-  const arg = `${vars}${dial} &park()`;
+  const arg = buildOriginateArg(params);
 
   const conn = await getEslConnection();
 

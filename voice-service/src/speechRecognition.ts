@@ -26,17 +26,21 @@ export const speechRecognition = {
     const deepgram = createClient(apiKey);
 
     const sampleRate = parseInt(process.env.DEEPGRAM_SAMPLE_RATE || '16000', 10);
+    const endpointing = parseInt(process.env.DEEPGRAM_ENDPOINTING_MS || '260', 10);
+    const utteranceEndMs = parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS || '900', 10);
+    const model = (process.env.DEEPGRAM_MODEL || 'nova-2').trim();
+    const language = (process.env.DEEPGRAM_LANGUAGE || 'en-IN').trim();
 
     const live = deepgram.listen.live({
-      model: 'nova-2',
-      language: 'en-IN',
+      model,
+      language,
       encoding: 'linear16',
       sample_rate: sampleRate,
       channels: 1,
       punctuate: true,
       interim_results: true,
-      endpointing: 300,            // VAD: send final transcript after 300ms silence
-      utterance_end_ms: 1000,      // Treat as speech end after 1s of silence
+      endpointing,
+      utterance_end_ms: utteranceEndMs,
       vad_events: true,
     });
 

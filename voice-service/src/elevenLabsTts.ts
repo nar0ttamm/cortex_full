@@ -15,20 +15,39 @@ function getModelId(): string {
   return (process.env.ELEVENLABS_MODEL || 'eleven_turbo_v2_5').trim();
 }
 
+function optionalVoiceSettings(): Record<string, number | boolean> | undefined {
+  const stability = process.env.ELEVENLABS_STABILITY;
+  const similarity = process.env.ELEVENLABS_SIMILARITY;
+  const style = process.env.ELEVENLABS_STYLE;
+  const speakerBoost = process.env.ELEVENLABS_SPEAKER_BOOST;
+  if (!stability && !similarity && !style && !speakerBoost) return undefined;
+  const out: Record<string, number | boolean> = {};
+  if (stability) out.stability = Math.min(1, Math.max(0, parseFloat(stability)));
+  if (similarity) out.similarity_boost = Math.min(1, Math.max(0, parseFloat(similarity)));
+  if (style) out.style = Math.min(1, Math.max(0, parseFloat(style)));
+  if (speakerBoost) out.use_speaker_boost = speakerBoost === 'true' || speakerBoost === '1';
+  return Object.keys(out).length ? out : undefined;
+}
+
 export async function synthesizeElevenLabsToPcm16(text: string): Promise<{ pcm: Buffer; sampleRate: number }> {
   const apiKey = (process.env.ELEVENLABS_API_KEY || '').trim();
   if (!apiKey) throw new Error('ELEVENLABS_API_KEY is not configured');
 
   const voiceId = getVoiceId();
   const outputFormat = (process.env.ELEVENLABS_OUTPUT_FORMAT || 'pcm_16000').trim();
+  const latency = (process.env.ELEVENLABS_STREAM_LATENCY || '3').trim();
   const path =
     `/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream` +
-    `?output_format=${encodeURIComponent(outputFormat)}&optimize_streaming_latency=3`;
+    `?output_format=${encodeURIComponent(outputFormat)}&optimize_streaming_latency=${encodeURIComponent(latency)}`;
 
-  const body = JSON.stringify({
+  const payload: Record<string, unknown> = {
     text,
     model_id: getModelId(),
-  });
+  };
+  const vs = optionalVoiceSettings();
+  if (vs) payload.voice_settings = vs;
+
+  const body = JSON.stringify(payload);
 
   const sampleRate = sampleRateFromOutputFormat(outputFormat);
 

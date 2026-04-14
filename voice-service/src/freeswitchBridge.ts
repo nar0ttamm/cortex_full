@@ -128,6 +128,7 @@ class FreeswitchBridge extends EventEmitter {
       name: ctx.name,
       callScript: ctx.callScript,
       startedAt: ctx.startTime,
+      answeredAt: Date.now(),
     }).catch((err: Error) => {
       console.error(`[FreeSWITCH] pipeline start ${uuid}:`, err.message);
       ctx.pipelineStarted = false;

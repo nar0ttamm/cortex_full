@@ -10,6 +10,7 @@ import { callStorage } from './callStorage';
 import { sessionStore } from './sessionStore';
 import { notifyBackendCallResult } from './backendNotify';
 import { pcm16leMonoToWav } from './wavUtil';
+import { metricVoice } from './voiceCallMetrics';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
@@ -20,6 +21,8 @@ export interface PipelineCtx {
   name: string;
   callScript?: string;
   startedAt: number;
+  /** Set when CHANNEL_ANSWER runs — used for latency metrics. */
+  answeredAt?: number;
 }
 
 interface Runtime {
@@ -37,6 +40,7 @@ interface Runtime {
   ended: boolean;
   lastUserNorm: string;
   lastUserAt: number;
+  turnIndex: number;
 }
 
 const pipelines = new Map<string, Runtime>();
@@ -129,7 +133,10 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     ended: false,
     lastUserNorm: '',
     lastUserAt: 0,
+    turnIndex: 0,
   };
+
+  const answeredAt = ctx.answeredAt ?? Date.now();
 
   const stt = speechRecognition.createStreamingSession({
     onTranscript: async (text: string, isFinal: boolean) => {
@@ -148,6 +155,9 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
       }
       if (rt.processingUserTurn) return;
       rt.processingUserTurn = true;
+      const turnStart = Date.now();
+      rt.turnIndex += 1;
+      const turnN = rt.turnIndex;
       try {
         console.log(`[pipeline:${callId}] user: ${cleaned}`);
         await callStorage.logEvent(callId, 'stt_final', { text: cleaned });
@@ -176,6 +186,8 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
             transcript_tail: assistantText,
           });
         }
+
+        metricVoice(callId, 'turn_user_to_ai_done', Date.now() - turnStart, { turn: turnN });
 
         if (conversationEngine.shouldEndCall(responseText)) {
           setTimeout(() => void finalizePipeline(callId, 'wrap_up'), 1200);
@@ -209,6 +221,7 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     const wsUrl = buildAudioIngressUrl(callId);
     const mix = (process.env.AUDIO_FORK_MIX || 'mono@16000h').trim();
     await uuidAudioForkStart({ callUuid: callId, wsUrl, mix });
+    metricVoice(callId, 'answer_to_audio_fork', Date.now() - answeredAt);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[pipeline:${callId}] uuid_audio_fork failed`, msg);
@@ -222,13 +235,19 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
 
   pipelines.set(callId, rt);
 
+  // Clear any placeholder media (e.g. silence_stream) so the first uuid_broadcast is clean.
+  await uuidBreak(callId).catch(() => {});
+
   const greeting =
     ctx.callScript ||
-    `Namaste, main CortexFlow se baat kar raha hoon — kya main ${ctx.name} ji se baat kar sakta hoon?`;
+    `Namaste, main CortexFlow se call kar raha hoon — ${ctx.name} ji, abhi thoda time milega baat karne ka?`;
 
   rt.conversationHistory.push({ role: 'assistant', content: greeting });
+  const g0 = Date.now();
   try {
     await speakText(callId, rt, greeting, seqRef);
+    metricVoice(callId, 'answer_to_greeting_done', Date.now() - answeredAt);
+    metricVoice(callId, 'greeting_tts_only', Date.now() - g0);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[pipeline:${callId}] greeting TTS failed`, msg);
