@@ -87,6 +87,19 @@ USE_ESL_ORIGINATE=true
 
 5. **mod_audio_fork** must be loaded for `uuid_audio_fork` → WebSocket → Deepgram path.
 
+### Minimal Docker images (e.g. `safarov/freeswitch`) — often **broken for AI**
+
+If `uuid_audio_fork` returns **Command not found** in `cortex_voice` logs, the image has **no** `mod_audio_fork.so`. **Node cannot fix that.** Use an image that ships the module (example: `drachtio/drachtio-freeswitch-mrf:v1.10.1-full` — verify with `find … mod_audio_fork.so` inside the image).
+
+**One clear migration path on the VM:**
+
+1. **Backup** SIP gateway XML from the old container (path is often under `/etc/freeswitch/sip_profiles/external/` or similar):
+   `docker cp freeswitch:/etc/freeswitch/sip_profiles ./fs-sip-backup` (adjust source path if different).
+2. **Stop and remove** the old container: `docker stop freeswitch && docker rm freeswitch` (frees port **8021**).
+3. **Run** the Drachtio image with the **same** ports your trunk needs, e.g. `-p 8021:8021 -p 5060:5060/tcp -p 5060:5060/udp` and mount or `docker cp` your gateway files back into `/etc/freeswitch/...`.
+4. Match **`FREESWITCH_ESL_PASSWORD`** in `voice-service/.env` to **`event_socket.conf.xml`** inside the container (often `ClueCon` on stock configs).
+5. **`pm2 restart cortex_voice`**, then run **`bash scripts/verify-ai-stack.sh`** from `voice-service` on the VM.
+
 ---
 
 ## 6. Cortex backend (Vercel) → voice VM
