@@ -94,6 +94,12 @@ Use the Docker bridge gateway to the host if that works on your VM (`172.17.0.1`
    **Note:** Plain `sudo` drops your shell exports. Use **`sudo -E`**, or put credentials in **`/opt/cortex_voice/telnyx-sip.env`** (`chmod 600`) and run **`sudo bash`** (the script sources that file when vars are unset).
 
    That inserts a gateway named **`telnyx`** (match `SIP_GATEWAY_NAME` in `.env`). Edits live **inside the container** until you volume-mount or bake a custom image.
+
+   **Why this keeps breaking (read once):**
+
+   - Telnyx’s own FreeSWITCH guide adds a file under **`sip_profiles/external/`**, which is loaded by the stock **`external`** Sofia profile. The **Drachtio MRF** Docker image does **not** ship that tree; it ships **`sip_profiles/mrf.xml`** with a single profile **`drachtio_mrf`**. Your trunk must live **there** (or you add a whole second profile and includes yourself). Putting only `external/telnyx.xml` in the container **does nothing** if nothing includes it.
+   - The app dials `sofia/gateway/telnyx/<E164>` (see `eslClient.ts`). FreeSWITCH returns **`INVALID_GATEWAY`** when no loaded gateway is named **`telnyx`**. The CLI message **`Invalid Gateway!`** from `sofia status gateway telnyx` means the **same thing** (that name is not loaded)—not a separate bug.
+   - Running the patch with **`sudo`** without **`-E`** or a creds file often **silently skipped applying XML** (env vars empty), so you stayed at zero gateways for hours. The fix is **`sudo -E`**, **`sudo VAR=… bash …`**, or **`/opt/cortex_voice/telnyx-sip.env`** + `sudo bash` as documented.
 3. Env:
 
 ```env

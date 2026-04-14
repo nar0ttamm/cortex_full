@@ -87,13 +87,18 @@ if idx_rel == -1:
 idx = start + idx_rel
 idx_end = idx + len("</settings>")
 
+# Telnyx credentials trunk (see Telnyx “FreeSWITCH: Credentials Trunk”) — realm + register + auth.
+# Drachtio MRF image has ONLY profile `drachtio_mrf` in sip_profiles/mrf.xml (no `external/` tree like stock FS).
 block = f"""    <gateways>
       <gateway name="telnyx">
         <param name="username" value="{user}"/>
         <param name="password" value="{pw}"/>
         <param name="realm" value="sip.telnyx.com"/>
         <param name="proxy" value="sip.telnyx.com"/>
+        <param name="register-proxy" value="sip.telnyx.com"/>
+        <param name="register-transport" value="udp"/>
         <param name="register" value="true"/>
+        <param name="caller-id-in-from" value="true"/>
       </gateway>
     </gateways>"""
 
@@ -107,11 +112,25 @@ rm -f "${TMP}"
 
 cli() { d exec "${CTR}" fs_cli -H 127.0.0.1 -P 8021 -p "${ESL_PASS}" -x "$1"; }
 
-cli "reloadxml"
+echo "=== reloadxml (must not show -ERR) ==="
+RX=$(cli "reloadxml" 2>&1 || true)
+echo "${RX}"
+if echo "${RX}" | grep -qi '\-ERR'; then
+  echo "FAIL: reloadxml failed — mrf.xml may be invalid. Check container logs." >&2
+  exit 1
+fi
+
 cli "sofia profile drachtio_mrf restart"
 echo ""
-echo "=== sofia status gateway (all) — look for telnyx under drachtio_mrf ==="
-cli "sofia status gateway"
+echo "=== sofia status gateway (full list) — you MUST see Gateway telnyx ==="
+GW_OUT=$(cli "sofia status gateway" 2>&1 || true)
+echo "${GW_OUT}"
+if ! echo "${GW_OUT}" | grep -q 'telnyx'; then
+  echo ""
+  echo "FAIL: gateway 'telnyx' still not listed. ESL dial string sofia/gateway/telnyx/... will return INVALID_GATEWAY." >&2
+  echo "Check: docker exec ${CTR} grep -n telnyx ${CONF_IN}" >&2
+  exit 1
+fi
 
 echo ""
 echo "Next: ensure voice-service .env has SIP_GATEWAY_NAME=telnyx and SIP_CALLER_ID_E164=+your DID, then: pm2 restart cortex_voice"

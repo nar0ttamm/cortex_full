@@ -75,4 +75,17 @@ echo "=== 5) uuid_audio_fork API ==="
 d exec "${FS}" fs_cli -H 127.0.0.1 -P "${ESL_PORT}" -p "${PASS}" -x "help uuid_audio_fork" 2>&1 | head -6
 
 echo ""
+echo "=== 6) Outbound SIP gateway 'telnyx' (required for ESL originate) ==="
+# INVALID_GATEWAY from api originate means this name is missing in Sofia. Telnyx docs use sip_profiles/external/,
+# but Drachtio MRF images typically only ship sip_profiles/mrf.xml (profile drachtio_mrf) — gateway must be there.
+GW_LIST=$(d exec "${FS}" fs_cli -H 127.0.0.1 -P "${ESL_PORT}" -p "${PASS}" -x "sofia status gateway" 2>&1 || true)
+if echo "${GW_LIST}" | grep -q 'telnyx'; then
+  echo "OK: gateway 'telnyx' appears in sofia status gateway"
+else
+  echo "WARN: no gateway named 'telnyx' — outbound calls fail with INVALID_GATEWAY until you run:"
+  echo "       freeswitch/patch-mrf-add-telnyx-gateway.sh (see MANUAL_SETUP.md §5)."
+  echo "       (Do not use 'sofia status gateway telnyx' to test — that prints Invalid Gateway if the name is absent.)"
+fi
+
+echo ""
 echo "=== All checks passed (CLI). Place a real test call, then: pm2 logs cortex_voice --lines 50 ==="
