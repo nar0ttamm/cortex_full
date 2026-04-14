@@ -65,6 +65,20 @@ ELEVENLABS_STREAM_LATENCY=3
 
 ---
 
+## 5a. Docker FreeSWITCH + Node on the host (audio fork WebSocket)
+
+`uuid_audio_fork` makes FreeSWITCH open **`AUDIO_INGRESS_WS_BASE`** (default `ws://127.0.0.1:5000`). Inside a container, **`127.0.0.1` is the container**, not the VM where **cortex_voice** listens — the fork fails, Deepgram opens/closes immediately, and logs may loop.
+
+Set on the VM, e.g.:
+
+```env
+AUDIO_INGRESS_WS_BASE=ws://172.17.0.1:5000
+```
+
+Use the Docker bridge gateway to the host if that works on your VM (`172.17.0.1` is common on Linux). Otherwise use the host’s **LAN IP** reachable from the container. Then `pm2 restart cortex_voice`.
+
+---
+
 ## 5. FreeSWITCH + SIP trunk (e.g. Telnyx)
 
 1. Install FreeSWITCH on the same VM (or reachable host).

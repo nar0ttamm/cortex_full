@@ -219,6 +219,12 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
 
   try {
     const wsUrl = buildAudioIngressUrl(callId);
+    if (/\/\/127\.0\.0\.1|\/\/localhost/.test(wsUrl)) {
+      console.warn(
+        `[pipeline:${callId}] WebSocket URL uses loopback. If FreeSWITCH runs in Docker, 127.0.0.1 is the *container*, not this host — fork will fail. Set AUDIO_INGRESS_WS_BASE=ws://<host-ip>:5000 (e.g. 172.17.0.1 or the VM LAN IP).`
+      );
+    }
+    console.log(`[pipeline:${callId}] uuid_audio_fork ws: ${wsUrl.split('?')[0]}…`);
     const mix = (process.env.AUDIO_FORK_MIX || 'mono@16000h').trim();
     await uuidAudioForkStart({ callUuid: callId, wsUrl, mix });
     metricVoice(callId, 'answer_to_audio_fork', Date.now() - answeredAt);
