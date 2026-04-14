@@ -1,27 +1,21 @@
 #!/usr/bin/env bash
 #
-# One-shot: add a Telnyx SIP gateway named "telnyx" to drachtio_mrf in mrf.xml (fixes INVALID_GATEWAY
-# when you have 0 gateways). Run ON THE VM as a user who can sudo docker.
+# Install Telnyx SIP trunk using the OFFICIAL FreeSWITCH pattern (Telnyx "Credentials Trunk" doc):
+#   sip_profiles/external.xml  +  sip_profiles/external/*.xml
+#
+# The Drachtio MRF image only ships drachtio_mrf in mrf.xml. Embedded <gateways> there often show up as
+# "0 gateways" in `sofia status gateway` (profile tuned for MRF media, not provider gateways). This script
+# adds a separate Sofia profile "external" exactly like vanilla FreeSWITCH + Telnyx docs.
 #
 # Usage (pick one):
-#   A) Preserve env through sudo:
-#        export TELNYX_SIP_USERNAME='…' TELNYX_SIP_PASSWORD='…'
-#        sudo -E bash freeswitch/patch-mrf-add-telnyx-gateway.sh
-#   B) Inline (works without -E):
-#        sudo TELNYX_SIP_USERNAME='…' TELNYX_SIP_PASSWORD='…' bash freeswitch/patch-mrf-add-telnyx-gateway.sh
-#   C) Put exports in /opt/cortex_voice/telnyx-sip.env (chmod 600), then:
-#        sudo bash freeswitch/patch-mrf-add-telnyx-gateway.sh
-#      (script sources that file when vars are unset — plain sudo clears exports unless -E)
+#   A) sudo -E bash freeswitch/patch-mrf-add-telnyx-gateway.sh
+#   B) sudo TELNYX_SIP_USERNAME='…' TELNYX_SIP_PASSWORD='…' bash freeswitch/patch-mrf-add-telnyx-gateway.sh
+#   C) Credentials in /opt/cortex_voice/telnyx-sip.env (chmod 600), then: sudo bash …
 #
-# Optional:
-#   export FS_CONTAINER=freeswitch
-#   export FS_ESL_PASSWORD=ClueCon
-#   export TELNYX_ENV_FILE=/path/to/custom.env   # overrides default file path
+# Optional: FS_CONTAINER=freeswitch  FS_ESL_PASSWORD=ClueCon  TELNYX_ENV_FILE=…
 #
 set -euo pipefail
 
-# sudo resets the environment by default, so exports from your shell are not visible unless you use
-# sudo -E or pass vars on the command line. If still missing, load a root-readable env file.
 if [[ -z "${TELNYX_SIP_USERNAME:-}" || -z "${TELNYX_SIP_PASSWORD:-}" ]]; then
   ENV_FILE="${TELNYX_ENV_FILE:-/opt/cortex_voice/telnyx-sip.env}"
   if [[ -f "${ENV_FILE}" ]]; then
@@ -37,122 +31,159 @@ fi
 
 CTR="${FS_CONTAINER:-freeswitch}"
 ESL_PASS="${FS_ESL_PASSWORD:-ClueCon}"
-CONF_IN="/usr/local/freeswitch/conf/sip_profiles/mrf.xml"
-TMP="/tmp/mrf.xml.$$"
+CONF_DIR="/usr/local/freeswitch/conf/sip_profiles"
+MRF_XML="${CONF_DIR}/mrf.xml"
+EXT_XML="${CONF_DIR}/external.xml"
+GW_XML="${CONF_DIR}/external/telnyx.xml"
 
 d() {
   if sudo docker ps >/dev/null 2>&1; then sudo docker "$@"
   else docker "$@"; fi
 }
 
-d cp "${CTR}:${CONF_IN}" "${TMP}"
+cli() { d exec "${CTR}" fs_cli -H 127.0.0.1 -P 8021 -p "${ESL_PASS}" -x "$1"; }
 
-export MRF_TMP="${TMP}"
-export TELNYX_SIP_USERNAME TELNYX_SIP_PASSWORD
+WORKDIR="/tmp/telnyx-fs-$$"
+mkdir -p "${WORKDIR}"
+trap 'rm -rf "${WORKDIR}"' EXIT
+
+# --- 1) Remove any <gateways> block from drachtio_mrf in mrf.xml (avoid duplicate gateway name "telnyx") ---
+d cp "${CTR}:${MRF_XML}" "${WORKDIR}/mrf.xml"
+
+export MRF_CLEAN="${WORKDIR}/mrf.xml"
+
 python3 <<'PY'
 import os
 import sys
 import xml.etree.ElementTree as ET
 
-path = os.environ["MRF_TMP"]
-user = os.environ["TELNYX_SIP_USERNAME"]
-pw = os.environ["TELNYX_SIP_PASSWORD"]
+path = os.environ["MRF_CLEAN"]
 
-
-def local_tag(tag: str) -> str:
+def local_tag(tag):
     return tag.split("}")[-1]
 
-
-def find_drachtio_profile(root):
+def find_profile(root):
     for el in root.iter():
         if local_tag(el.tag) == "profile" and el.get("name") == "drachtio_mrf":
             return el
     return None
 
-
-def ensure_gateways(profile: ET.Element) -> ET.Element:
-    for child in list(profile):
-        if local_tag(child.tag) == "gateways":
-            return child
-    gw_root = ET.Element("gateways")
-    # Insert after <settings> (same sibling order FS expects: domains, settings, gateways, …)
-    for i, child in enumerate(list(profile)):
-        if local_tag(child.tag) == "settings":
-            profile.insert(i + 1, gw_root)
-            return gw_root
-    profile.append(gw_root)
-    return gw_root
-
-
-def remove_telnyx(gateways_el: ET.Element) -> None:
-    for child in list(gateways_el):
-        if local_tag(child.tag) == "gateway" and child.get("name") == "telnyx":
-            gateways_el.remove(child)
-
-
-def add_telnyx_gateway(gateways_el: ET.Element) -> None:
-    gw = ET.SubElement(gateways_el, "gateway", {"name": "telnyx"})
-    params = [
-        ("username", user),
-        ("password", pw),
-        ("realm", "sip.telnyx.com"),
-        ("proxy", "sip.telnyx.com"),
-        ("register-proxy", "sip.telnyx.com"),
-        ("register-transport", "udp"),
-        ("register", "true"),
-        ("caller-id-in-from", "true"),
-    ]
-    for name, val in params:
-        ET.SubElement(gw, "param", {"name": name, "value": val})
-
-
-# Do NOT use string find("</settings>"): Drachtio mrf.xml has long <!-- --> blocks; a comment can
-# contain the text "</settings>", so naive insertion puts <gateways> inside the comment. FS then
-# loads 0 gateways while reloadxml still returns +OK.
 try:
     tree = ET.parse(path)
 except ET.ParseError as e:
-    print(f"ERROR: mrf.xml is not valid XML ({e}). Restore from image or git and retry.", file=sys.stderr)
+    print(f"ERROR: mrf.xml invalid XML ({e})", file=sys.stderr)
     sys.exit(1)
 
 root = tree.getroot()
-profile = find_drachtio_profile(root)
+profile = find_profile(root)
 if profile is None:
-    print('ERROR: no <profile name="drachtio_mrf"> in mrf.xml', file=sys.stderr)
-    sys.exit(1)
-
-gateways_el = ensure_gateways(profile)
-remove_telnyx(gateways_el)
-add_telnyx_gateway(gateways_el)
+    print("WARN: no drachtio_mrf profile in mrf.xml — skipping mrf cleanup", file=sys.stderr)
+else:
+    for child in list(profile):
+        if local_tag(child.tag) == "gateways":
+            profile.remove(child)
+            print("Removed <gateways> from drachtio_mrf (use external profile for Telnyx).")
 
 tree.write(path, encoding="utf-8", xml_declaration=True)
-print("Patched mrf.xml (ElementTree: <gateways> under drachtio_mrf, not inside comments).")
 PY
 
-d cp "${TMP}" "${CTR}:${CONF_IN}"
-rm -f "${TMP}"
+d cp "${WORKDIR}/mrf.xml" "${CTR}:${MRF_XML}"
 
-cli() { d exec "${CTR}" fs_cli -H 127.0.0.1 -P 8021 -p "${ESL_PASS}" -x "$1"; }
+# --- 2) Vanilla-style external profile (sip-port 5070 — avoids clashing with drachtio_mrf on 5080) ---
+cat >"${WORKDIR}/external.xml" <<'XMLEOF'
+<?xml version="1.0"?>
+<profile name="external">
+  <!-- Outbound provider gateways (Telnyx doc: sip_profiles/external/*.xml) -->
+  <gateways>
+    <X-PRE-PROCESS cmd="include" data="external/*.xml"/>
+  </gateways>
+  <domains>
+    <domain name="all" alias="false" parse="true"/>
+  </domains>
+  <settings>
+    <param name="sip-trace" value="no"/>
+    <param name="sip-port" value="5070"/>
+    <param name="context" value="public"/>
+    <param name="dialplan" value="XML"/>
+    <param name="rtp-ip" value="$${local_ip_v4}"/>
+    <param name="sip-ip" value="$${local_ip_v4}"/>
+    <param name="ext-rtp-ip" value="$${local_ip_v4}"/>
+    <param name="ext-sip-ip" value="$${local_ip_v4}"/>
+    <param name="auth-calls" value="false"/>
+    <param name="rtp-timer-name" value="soft"/>
+    <param name="codec-prefs" value="$${global_codec_prefs}"/>
+    <param name="inbound-codec-negotiation" value="generous"/>
+    <param name="manage-presence" value="false"/>
+    <param name="tls" value="false"/>
+  </settings>
+</profile>
+XMLEOF
 
+d exec "${CTR}" mkdir -p "${CONF_DIR}/external"
+d cp "${WORKDIR}/external.xml" "${CTR}:${EXT_XML}"
+
+# --- 3) Telnyx gateway fragment (same shape as Telnyx Help Center example) ---
+export GW_OUT="${WORKDIR}/telnyx.xml"
+export TELNYX_SIP_USERNAME TELNYX_SIP_PASSWORD
+python3 <<'PY'
+import os
+import xml.etree.ElementTree as ET
+
+out = os.environ["GW_OUT"]
+user = os.environ["TELNYX_SIP_USERNAME"]
+pw = os.environ["TELNYX_SIP_PASSWORD"]
+
+root = ET.Element("include")
+gw = ET.SubElement(root, "gateway", {"name": "telnyx"})
+params = [
+    ("realm", "sip.telnyx.com"),
+    ("username", user),
+    ("password", pw),
+    ("register", "true"),
+    ("proxy", "sip.telnyx.com"),
+]
+for name, val in params:
+    ET.SubElement(gw, "param", {"name": name, "value": val})
+
+ET.ElementTree(root).write(out, encoding="utf-8", xml_declaration=True)
+print(f"Wrote {out}")
+PY
+
+d cp "${WORKDIR}/telnyx.xml" "${CTR}:${GW_XML}"
+
+# --- 4) Load configs ---
 echo "=== reloadxml (must not show -ERR) ==="
 RX=$(cli "reloadxml" 2>&1 || true)
 echo "${RX}"
 if echo "${RX}" | grep -qi '\-ERR'; then
-  echo "FAIL: reloadxml failed — mrf.xml may be invalid. Check container logs." >&2
+  echo "FAIL: reloadxml reported an error." >&2
   exit 1
 fi
 
-cli "sofia profile drachtio_mrf restart"
+echo "=== sofia profile external (load Telnyx gateway) ==="
+# First time: start. Later runs: start may fail if already up — then restart.
+if ! cli "sofia profile external start" 2>&1; then
+  cli "sofia profile external restart" 2>&1 || true
+fi
+cli "sofia profile drachtio_mrf restart" 2>&1 || true
+cli "sofia profile external rescan reload" 2>&1 || true
+
 echo ""
-echo "=== sofia status gateway (full list) — you MUST see Gateway telnyx ==="
+echo "=== sofia status profile (expect external + drachtio_mrf) ==="
+cli "sofia status profile" 2>&1 | head -40
+
+echo ""
+echo "=== sofia status gateway — must list Gateway telnyx ==="
 GW_OUT=$(cli "sofia status gateway" 2>&1 || true)
 echo "${GW_OUT}"
-if ! echo "${GW_OUT}" | grep -q 'telnyx'; then
-  echo ""
-  echo "FAIL: gateway 'telnyx' still not listed. ESL dial string sofia/gateway/telnyx/... will return INVALID_GATEWAY." >&2
-  echo "Check: docker exec ${CTR} grep -n telnyx ${CONF_IN}" >&2
+if ! echo "${GW_OUT}" | grep -qi 'telnyx'; then
+  echo "" >&2
+  echo "FAIL: gateway 'telnyx' not loaded. Check:" >&2
+  echo "  sudo docker exec ${CTR} grep -R telnyx ${CONF_DIR}" >&2
+  echo "  sudo docker exec ${CTR} fs_cli -x 'console loglevel debug'" >&2
+  echo "  sudo docker logs ${CTR} 2>&1 | tail -80" >&2
   exit 1
 fi
 
 echo ""
-echo "Next: ensure voice-service .env has SIP_GATEWAY_NAME=telnyx and SIP_CALLER_ID_E164=+your DID, then: pm2 restart cortex_voice"
+echo "OK: Telnyx gateway is registered with Sofia. Set SIP_GATEWAY_NAME=telnyx and SIP_CALLER_ID_E164=+your DID in voice-service .env, then: pm2 restart cortex_voice"

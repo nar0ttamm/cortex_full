@@ -82,8 +82,9 @@ Use the Docker bridge gateway to the host if that works on your VM (`172.17.0.1`
 ## 5. FreeSWITCH + SIP trunk (e.g. Telnyx)
 
 1. Install FreeSWITCH on the same VM (or reachable host).
-2. Configure **Sofia gateway** to your provider (credentials, proxy, registration if required).  
-   On the **Drachtio MRF** image, profiles are under `/usr/local/freeswitch/conf/sip_profiles/` (often only `mrf.xml` for profile `drachtio_mrf`). If `fs_cli` reports **0 gateways** or originate returns **INVALID_GATEWAY**, you still need a real gateway in XML. After `git pull`, from `voice-service` on the VM:
+2. Configure **Sofia gateway** to your provider. Telnyx’s [Credentials Trunk](https://support.telnyx.com/en/articles/1618801-freeswitch-credentials-trunk) guide uses the **vanilla FreeSWITCH layout**: **`sip_profiles/external.xml`** (profile `external`) plus **`sip_profiles/external/*.xml`** (your gateway). The Drachtio MRF image only ships **`mrf.xml`** (profile **`drachtio_mrf`**); **embedded `<gateways>` there often never show up in `sofia status gateway`** on that build. The repo script therefore adds the **full `external` profile** (SIP **UDP 5070** inside the container, to avoid clashing with **`drachtio_mrf` on 5080**), writes **`external/telnyx.xml`**, and **removes** any `<gateways>` block from **`drachtio_mrf`** so the gateway name **`telnyx`** is not duplicated.
+
+   From `voice-service` on the VM:
 
    ```bash
    export TELNYX_SIP_USERNAME='…'
@@ -91,16 +92,9 @@ Use the Docker bridge gateway to the host if that works on your VM (`172.17.0.1`
    sudo -E bash freeswitch/patch-mrf-add-telnyx-gateway.sh
    ```
 
-   **Note:** Plain `sudo` drops your shell exports. Use **`sudo -E`**, or put credentials in **`/opt/cortex_voice/telnyx-sip.env`** (`chmod 600`) and run **`sudo bash`** (the script sources that file when vars are unset).
+   **Note:** Plain `sudo` drops your shell exports. Use **`sudo -E`**, **`sudo VAR=… bash …`**, or **`/opt/cortex_voice/telnyx-sip.env`** (`chmod 600`) with **`sudo bash`** (the script sources that file when vars are unset).
 
-   That inserts a gateway named **`telnyx`** (match `SIP_GATEWAY_NAME` in `.env`). Edits live **inside the container** until you volume-mount or bake a custom image.
-
-   **Why this keeps breaking (read once):**
-
-   - Telnyx’s own FreeSWITCH guide adds a file under **`sip_profiles/external/`**, which is loaded by the stock **`external`** Sofia profile. The **Drachtio MRF** Docker image does **not** ship that tree; it ships **`sip_profiles/mrf.xml`** with a single profile **`drachtio_mrf`**. Your trunk must live **there** (or you add a whole second profile and includes yourself). Putting only `external/telnyx.xml` in the container **does nothing** if nothing includes it.
-   - The app dials `sofia/gateway/telnyx/<E164>` (see `eslClient.ts`). FreeSWITCH returns **`INVALID_GATEWAY`** when no loaded gateway is named **`telnyx`**. The CLI message **`Invalid Gateway!`** from `sofia status gateway telnyx` means the **same thing** (that name is not loaded)—not a separate bug.
-   - Running the patch with **`sudo`** without **`-E`** or a creds file often **silently skipped applying XML** (env vars empty), so you stayed at zero gateways for hours. The fix is **`sudo -E`**, **`sudo VAR=… bash …`**, or **`/opt/cortex_voice/telnyx-sip.env`** + `sudo bash` as documented.
-   - If **`reloadxml` succeeds** but **`sofia status gateway`** still shows **0 gateways**, an older string-based patch may have inserted XML **inside an HTML comment** (Drachtio’s `mrf.xml` comments can contain the text `</settings>`). **Pull the latest `patch-mrf-add-telnyx-gateway.sh`** (uses Python ElementTree to place `<gateways>` under the profile). If the file is corrupted, restore **`mrf.xml`** from a fresh container image, then rerun the script.
+   You should see **`Gateway telnyx`** under **`sofia status gateway`**. The app still dials **`sofia/gateway/telnyx/<E164>`** (`eslClient.ts`). If registration is flaky behind strict NAT, map **UDP 5070** on the host to the container (`-p 5070:5070/udp`). Config lives **inside the container** until you volume-mount or bake an image.
 3. Env:
 
 ```env

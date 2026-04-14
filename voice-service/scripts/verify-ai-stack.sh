@@ -85,8 +85,7 @@ if echo "${GW_LIST}" | grep -qi 'telnyx'; then
   echo "OK: gateway 'telnyx' appears in sofia status gateway"
 else
   echo "WARN: no gateway named 'telnyx' — outbound calls fail with INVALID_GATEWAY until you run:"
-  echo "       freeswitch/patch-mrf-add-telnyx-gateway.sh (see MANUAL_SETUP.md §5)."
-  echo "       If you already ran it but see 0 gateways, git pull the latest script (ElementTree fix) or restore clean mrf.xml from the image."
+  echo "       freeswitch/patch-mrf-add-telnyx-gateway.sh (installs vanilla external profile + external/telnyx.xml; see MANUAL_SETUP.md §5)."
   echo "       (Do not use 'sofia status gateway telnyx' alone — that prints Invalid Gateway if the name is absent.)"
 fi
 
