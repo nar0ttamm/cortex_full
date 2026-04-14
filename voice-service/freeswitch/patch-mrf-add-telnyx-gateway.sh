@@ -43,10 +43,31 @@ path = os.environ["MRF_TMP"]
 content = open(path, encoding="utf-8").read()
 if 'gateway name="telnyx"' in content:
     print("Already patched: telnyx gateway present in mrf.xml — nothing to do.")
+    print("If `sofia status gateway` still does not list telnyx, delete that <gateways>...</gateways> block from mrf.xml and run this script again.")
     sys.exit(0)
-if "</settings>" not in content:
-    print("ERROR: no </settings> in mrf.xml", file=sys.stderr)
+
+# Insert after </settings> for profile drachtio_mrf only (first </settings> in file can be wrong profile).
+profile_markers = (
+    '<profile name="drachtio_mrf">',
+    "<profile name='drachtio_mrf'>",
+)
+start = -1
+for marker in profile_markers:
+    start = content.find(marker)
+    if start != -1:
+        break
+if start == -1:
+    print("ERROR: no <profile name=\"drachtio_mrf\"> in mrf.xml", file=sys.stderr)
     sys.exit(1)
+
+rest = content[start:]
+idx_rel = rest.find("</settings>")
+if idx_rel == -1:
+    print("ERROR: no </settings> after drachtio_mrf profile in mrf.xml", file=sys.stderr)
+    sys.exit(1)
+
+idx = start + idx_rel
+idx_end = idx + len("</settings>")
 
 block = f"""    <gateways>
       <gateway name="telnyx">
@@ -58,8 +79,6 @@ block = f"""    <gateways>
       </gateway>
     </gateways>"""
 
-idx = content.find("</settings>")
-idx_end = idx + len("</settings>")
 newc = content[:idx_end] + "\n" + block + content[idx_end:]
 open(path, "w", encoding="utf-8").write(newc)
 print("Patched mrf.xml (inserted gateways after </settings>).")
@@ -71,9 +90,9 @@ rm -f "${TMP}"
 cli() { d exec "${CTR}" fs_cli -H 127.0.0.1 -P 8021 -p "${ESL_PASS}" -x "$1"; }
 
 cli "reloadxml"
-cli "sofia profile drachtio_mrf rescan"
+cli "sofia profile drachtio_mrf restart"
 echo ""
-echo "=== sofia status gateway ==="
+echo "=== sofia status gateway (all) — look for telnyx under drachtio_mrf ==="
 cli "sofia status gateway"
 
 echo ""
