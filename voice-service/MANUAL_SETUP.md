@@ -82,7 +82,16 @@ Use the Docker bridge gateway to the host if that works on your VM (`172.17.0.1`
 ## 5. FreeSWITCH + SIP trunk (e.g. Telnyx)
 
 1. Install FreeSWITCH on the same VM (or reachable host).
-2. Configure **Sofia gateway** to your provider (credentials, proxy, registration if required).
+2. Configure **Sofia gateway** to your provider (credentials, proxy, registration if required).  
+   On the **Drachtio MRF** image, profiles are under `/usr/local/freeswitch/conf/sip_profiles/` (often only `mrf.xml` for profile `drachtio_mrf`). If `fs_cli` reports **0 gateways** or originate returns **INVALID_GATEWAY**, you still need a real gateway in XML. After `git pull`, from `voice-service` on the VM:
+
+   ```bash
+   export TELNYX_SIP_USERNAME='…'
+   export TELNYX_SIP_PASSWORD='…'
+   sudo bash freeswitch/patch-mrf-add-telnyx-gateway.sh
+   ```
+
+   That inserts a gateway named **`telnyx`** (match `SIP_GATEWAY_NAME` in `.env`). Edits live **inside the container** until you volume-mount or bake a custom image.
 3. Env:
 
 ```env
