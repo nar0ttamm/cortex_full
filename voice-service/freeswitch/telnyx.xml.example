@@ -1,0 +1,12 @@
+<!-- Copy to /opt/freeswitch-config/telnyx.xml on the VPS and bind-mount into Docker (see GCP_SESSION_GUIDE.md). -->
+<include>
+  <gateway name="telnyx">
+    <param name="username" value="YOUR_TELNYX_SIP_USERNAME"/>
+    <param name="password" value="YOUR_TELNYX_SIP_PASSWORD"/>
+    <param name="realm" value="sip.telnyx.com"/>
+    <param name="proxy" value="sip.telnyx.com"/>
+    <param name="register" value="true"/>
+    <param name="register-transport" value="udp"/>
+    <param name="caller-id-in-from" value="true"/>
+  </gateway>
+</include>
