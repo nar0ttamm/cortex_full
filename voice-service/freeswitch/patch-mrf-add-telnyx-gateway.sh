@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# Install Telnyx SIP trunk using the OFFICIAL FreeSWITCH pattern (Telnyx "Credentials Trunk" doc):
-#   sip_profiles/external.xml  +  sip_profiles/external/*.xml
+# Install Telnyx SIP trunk: adds sip_profiles/external.xml with profile "external" and an INLINE <gateway>.
 #
-# The Drachtio MRF image only ships drachtio_mrf in mrf.xml. Embedded <gateways> there often show up as
-# "0 gateways" in `sofia status gateway` (profile tuned for MRF media, not provider gateways). This script
-# adds a separate Sofia profile "external" exactly like vanilla FreeSWITCH + Telnyx docs.
+# Why not sip_profiles/external/*.xml like Telnyx’s doc? On many installs, X-PRE-PROCESS data="external/*.xml"
+# resolves from conf/ (→ conf/external/) NOT sip_profiles/external/, so includes silently add zero gateways.
+# Inlining avoids include path bugs entirely.
+#
+# Drachtio ships only drachtio_mrf in mrf.xml; we strip any <gateways> from mrf to avoid duplicate name "telnyx".
 #
 # Usage (pick one):
 #   A) sudo -E bash freeswitch/patch-mrf-add-telnyx-gateway.sh
@@ -34,7 +35,6 @@ ESL_PASS="${FS_ESL_PASSWORD:-ClueCon}"
 CONF_DIR="/usr/local/freeswitch/conf/sip_profiles"
 MRF_XML="${CONF_DIR}/mrf.xml"
 EXT_XML="${CONF_DIR}/external.xml"
-GW_XML="${CONF_DIR}/external/telnyx.xml"
 
 d() {
   if sudo docker ps >/dev/null 2>&1; then sudo docker "$@"
@@ -89,69 +89,65 @@ PY
 
 d cp "${WORKDIR}/mrf.xml" "${CTR}:${MRF_XML}"
 
-# --- 2) Vanilla-style external profile (sip-port 5070 — avoids clashing with drachtio_mrf on 5080) ---
-cat >"${WORKDIR}/external.xml" <<'XMLEOF'
-<?xml version="1.0"?>
-<profile name="external">
-  <!-- Outbound provider gateways (Telnyx doc: sip_profiles/external/*.xml) -->
-  <gateways>
-    <X-PRE-PROCESS cmd="include" data="external/*.xml"/>
-  </gateways>
-  <domains>
-    <domain name="all" alias="false" parse="true"/>
-  </domains>
-  <settings>
-    <param name="sip-trace" value="no"/>
-    <param name="sip-port" value="5070"/>
-    <param name="context" value="public"/>
-    <param name="dialplan" value="XML"/>
-    <param name="rtp-ip" value="$${local_ip_v4}"/>
-    <param name="sip-ip" value="$${local_ip_v4}"/>
-    <param name="ext-rtp-ip" value="$${local_ip_v4}"/>
-    <param name="ext-sip-ip" value="$${local_ip_v4}"/>
-    <param name="auth-calls" value="false"/>
-    <param name="rtp-timer-name" value="soft"/>
-    <param name="codec-prefs" value="$${global_codec_prefs}"/>
-    <param name="inbound-codec-negotiation" value="generous"/>
-    <param name="manage-presence" value="false"/>
-    <param name="tls" value="false"/>
-  </settings>
-</profile>
-XMLEOF
-
-d exec "${CTR}" mkdir -p "${CONF_DIR}/external"
-d cp "${WORKDIR}/external.xml" "${CTR}:${EXT_XML}"
-
-# --- 3) Telnyx gateway fragment (same shape as Telnyx Help Center example) ---
-export GW_OUT="${WORKDIR}/telnyx.xml"
+# --- 2) external.xml: <include><profile>…</profile></include> (same root pattern as mrf.xml) + INLINE gateway ---
+export EXT_OUT="${WORKDIR}/external.xml"
 export TELNYX_SIP_USERNAME TELNYX_SIP_PASSWORD
 python3 <<'PY'
 import os
 import xml.etree.ElementTree as ET
 
-out = os.environ["GW_OUT"]
 user = os.environ["TELNYX_SIP_USERNAME"]
 pw = os.environ["TELNYX_SIP_PASSWORD"]
+out = os.environ["EXT_OUT"]
 
 root = ET.Element("include")
-gw = ET.SubElement(root, "gateway", {"name": "telnyx"})
-params = [
+profile = ET.SubElement(root, "profile", {"name": "external"})
+
+gateways = ET.SubElement(profile, "gateways")
+gw = ET.SubElement(gateways, "gateway", {"name": "telnyx"})
+for name, val in [
     ("realm", "sip.telnyx.com"),
     ("username", user),
     ("password", pw),
     ("register", "true"),
     ("proxy", "sip.telnyx.com"),
-]
-for name, val in params:
+    ("register-proxy", "sip.telnyx.com"),
+    ("register-transport", "udp"),
+    ("caller-id-in-from", "true"),
+]:
     ET.SubElement(gw, "param", {"name": name, "value": val})
 
+domains = ET.SubElement(profile, "domains")
+ET.SubElement(domains, "domain", {"name": "all", "alias": "false", "parse": "true"})
+
+settings = ET.SubElement(profile, "settings")
+for name, val in [
+    ("sip-trace", "no"),
+    ("sip-port", "5070"),
+    ("context", "public"),
+    ("dialplan", "XML"),
+    ("rtp-ip", "$${local_ip_v4}"),
+    ("sip-ip", "$${local_ip_v4}"),
+    ("ext-rtp-ip", "$${local_ip_v4}"),
+    ("ext-sip-ip", "$${local_ip_v4}"),
+    ("auth-calls", "false"),
+    ("rtp-timer-name", "soft"),
+    ("codec-prefs", "$${global_codec_prefs}"),
+    ("inbound-codec-negotiation", "generous"),
+    ("manage-presence", "false"),
+    ("tls", "false"),
+]:
+    ET.SubElement(settings, "param", {"name": name, "value": val})
+
 ET.ElementTree(root).write(out, encoding="utf-8", xml_declaration=True)
-print(f"Wrote {out}")
+print(f"Wrote {out} (inline telnyx gateway, no X-PRE-PROCESS include)")
 PY
 
-d cp "${WORKDIR}/telnyx.xml" "${CTR}:${GW_XML}"
+# Remove stale split-file layout so old includes cannot confuse anyone
+d exec "${CTR}" rm -f "${CONF_DIR}/external/telnyx.xml" 2>/dev/null || true
+d cp "${WORKDIR}/external.xml" "${CTR}:${EXT_XML}"
 
-# --- 4) Load configs ---
+# --- 3) Load configs ---
 echo "=== reloadxml (must not show -ERR) ==="
 RX=$(cli "reloadxml" 2>&1 || true)
 echo "${RX}"
@@ -160,8 +156,11 @@ if echo "${RX}" | grep -qi '\-ERR'; then
   exit 1
 fi
 
+echo "=== reload mod_sofia (pick up sip_profiles/*.xml) ==="
+cli "reload mod_sofia" 2>&1 || true
+
 echo "=== sofia profile external (load Telnyx gateway) ==="
-# First time: start. Later runs: start may fail if already up — then restart.
+cli "sofia profile external stop" 2>&1 || true
 if ! cli "sofia profile external start" 2>&1; then
   cli "sofia profile external restart" 2>&1 || true
 fi

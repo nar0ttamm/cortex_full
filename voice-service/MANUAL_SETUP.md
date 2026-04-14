@@ -82,7 +82,7 @@ Use the Docker bridge gateway to the host if that works on your VM (`172.17.0.1`
 ## 5. FreeSWITCH + SIP trunk (e.g. Telnyx)
 
 1. Install FreeSWITCH on the same VM (or reachable host).
-2. Configure **Sofia gateway** to your provider. Telnyx’s [Credentials Trunk](https://support.telnyx.com/en/articles/1618801-freeswitch-credentials-trunk) guide uses the **vanilla FreeSWITCH layout**: **`sip_profiles/external.xml`** (profile `external`) plus **`sip_profiles/external/*.xml`** (your gateway). The Drachtio MRF image only ships **`mrf.xml`** (profile **`drachtio_mrf`**); **embedded `<gateways>` there often never show up in `sofia status gateway`** on that build. The repo script therefore adds the **full `external` profile** (SIP **UDP 5070** inside the container, to avoid clashing with **`drachtio_mrf` on 5080**), writes **`external/telnyx.xml`**, and **removes** any `<gateways>` block from **`drachtio_mrf`** so the gateway name **`telnyx`** is not duplicated.
+2. Configure **Sofia gateway** to your provider. Telnyx’s [Credentials Trunk](https://support.telnyx.com/en/articles/1618801-freeswitch-credentials-trunk) guide uses **`sip_profiles/external.xml`** plus includes under **`sip_profiles/external/`**. On Docker images, **`X-PRE-PROCESS` include paths** for `external/*.xml` often resolve to the wrong directory, so **zero gateways** load. The repo script instead writes **`sip_profiles/external.xml`** with the **Telnyx gateway inlined** (and the same **`<include><profile>`** root pattern as **`mrf.xml`**), removes any `<gateways>` from **`drachtio_mrf`**, runs **`reload mod_sofia`**, and starts profile **`external`** (SIP **UDP 5070**).
 
    From `voice-service` on the VM:
 
