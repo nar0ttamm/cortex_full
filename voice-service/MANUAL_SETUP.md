@@ -88,8 +88,10 @@ Use the Docker bridge gateway to the host if that works on your VM (`172.17.0.1`
    ```bash
    export TELNYX_SIP_USERNAME='…'
    export TELNYX_SIP_PASSWORD='…'
-   sudo bash freeswitch/patch-mrf-add-telnyx-gateway.sh
+   sudo -E bash freeswitch/patch-mrf-add-telnyx-gateway.sh
    ```
+
+   **Note:** Plain `sudo` drops your shell exports. Use **`sudo -E`**, or put credentials in **`/opt/cortex_voice/telnyx-sip.env`** (`chmod 600`) and run **`sudo bash`** (the script sources that file when vars are unset).
 
    That inserts a gateway named **`telnyx`** (match `SIP_GATEWAY_NAME` in `.env`). Edits live **inside the container** until you volume-mount or bake a custom image.
 3. Env:

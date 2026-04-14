@@ -3,18 +3,36 @@
 # One-shot: add a Telnyx SIP gateway named "telnyx" to drachtio_mrf in mrf.xml (fixes INVALID_GATEWAY
 # when you have 0 gateways). Run ON THE VM as a user who can sudo docker.
 #
-# Usage:
-#   export TELNYX_SIP_USERNAME='from Telnyx SIP connection'
-#   export TELNYX_SIP_PASSWORD='from Telnyx SIP connection'
-#   sudo bash patch-mrf-add-telnyx-gateway.sh
+# Usage (pick one):
+#   A) Preserve env through sudo:
+#        export TELNYX_SIP_USERNAME='…' TELNYX_SIP_PASSWORD='…'
+#        sudo -E bash freeswitch/patch-mrf-add-telnyx-gateway.sh
+#   B) Inline (works without -E):
+#        sudo TELNYX_SIP_USERNAME='…' TELNYX_SIP_PASSWORD='…' bash freeswitch/patch-mrf-add-telnyx-gateway.sh
+#   C) Put exports in /opt/cortex_voice/telnyx-sip.env (chmod 600), then:
+#        sudo bash freeswitch/patch-mrf-add-telnyx-gateway.sh
+#      (script sources that file when vars are unset — plain sudo clears exports unless -E)
 #
 # Optional:
 #   export FS_CONTAINER=freeswitch
 #   export FS_ESL_PASSWORD=ClueCon
+#   export TELNYX_ENV_FILE=/path/to/custom.env   # overrides default file path
 #
 set -euo pipefail
 
-: "${TELNYX_SIP_USERNAME:?Set TELNYX_SIP_USERNAME}"
+# sudo resets the environment by default, so exports from your shell are not visible unless you use
+# sudo -E or pass vars on the command line. If still missing, load a root-readable env file.
+if [[ -z "${TELNYX_SIP_USERNAME:-}" || -z "${TELNYX_SIP_PASSWORD:-}" ]]; then
+  ENV_FILE="${TELNYX_ENV_FILE:-/opt/cortex_voice/telnyx-sip.env}"
+  if [[ -f "${ENV_FILE}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}"
+    set +a
+  fi
+fi
+
+: "${TELNYX_SIP_USERNAME:?Set TELNYX_SIP_USERNAME (or use sudo -E, or ${TELNYX_ENV_FILE:-/opt/cortex_voice/telnyx-sip.env})}"
 : "${TELNYX_SIP_PASSWORD:?Set TELNYX_SIP_PASSWORD}"
 
 CTR="${FS_CONTAINER:-freeswitch}"
