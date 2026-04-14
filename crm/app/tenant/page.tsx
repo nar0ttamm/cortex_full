@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import { DEFAULT_TENANT_ID } from '@/lib/tenantConfig';
 
-const TENANT_ID = process.env.NEXT_PUBLIC_DEFAULT_TENANT_ID || 'b50750c7-0a91-4cd4-80fa-8921f974a8ec';
+const TENANT_ID = DEFAULT_TENANT_ID;
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 interface TenantProfile {

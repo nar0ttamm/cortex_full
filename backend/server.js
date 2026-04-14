@@ -37,6 +37,10 @@ app.use('/v1', require('./routes/credentials'));
 app.use('/v1', require('./routes/admin'));
 app.use('/v1', require('./routes/internal'));
 app.use('/v1', require('./routes/email'));
+// New: AI voice calling engine endpoints
+app.use('/v1', require('./routes/newCalls'));
+// New: Universal lead integration engine endpoints
+app.use('/v1', require('./routes/integrations'));
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars

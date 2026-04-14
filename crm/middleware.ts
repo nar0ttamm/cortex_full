@@ -1,7 +1,18 @@
 import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
 
-const PROTECTED_PREFIXES = ['/', '/leads', '/data', '/communications'];
+const PROTECTED_PREFIXES = [
+  '/',
+  '/leads',
+  '/calls',
+  '/data',
+  '/communications',
+  '/pipeline',
+  '/analytics',
+  '/appointments',
+  '/tenant',
+  '/integrations',
+];
 const AUTH_PAGES = ['/login', '/signup'];
 
 function isProtected(pathname: string): boolean {

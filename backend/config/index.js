@@ -32,4 +32,8 @@ module.exports = {
 
   // Cron job secret (Vercel sets this automatically)
   cronSecret: e(process.env.CRON_SECRET) || null,
+
+  // cortex_voice service
+  voiceServiceUrl: e(process.env.VOICE_SERVICE_URL) || null,
+  voiceSecret: e(process.env.VOICE_SECRET) || null,
 };

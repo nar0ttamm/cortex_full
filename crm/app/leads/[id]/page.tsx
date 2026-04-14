@@ -5,8 +5,11 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Lead } from '@/types';
 import { AppShell } from '../../components/AppShell';
+import { fetchCallsForTenant, startAiCall, type CallRow } from '@/lib/callsApi';
+import { DEFAULT_TENANT_ID } from '@/lib/tenantConfig';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const TENANT_ID = DEFAULT_TENANT_ID;
 
 interface Note {
   id: string;
@@ -35,8 +38,47 @@ export default function LeadDetailPage() {
   const [noteText, setNoteText] = useState('');
   const [addingNote, setAddingNote] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
+  const [leadCalls, setLeadCalls] = useState<CallRow[]>([]);
+  const [callsLoading, setCallsLoading] = useState(false);
+  const [callActionError, setCallActionError] = useState<string | null>(null);
+  const [callActionOk, setCallActionOk] = useState<string | null>(null);
+  const [startingCall, setStartingCall] = useState(false);
 
   useEffect(() => { fetchLead(); }, [leadId]);
+
+  const fetchLeadCalls = async () => {
+    if (!leadId) return;
+    setCallsLoading(true);
+    try {
+      const data = await fetchCallsForTenant(TENANT_ID, { leadId, limit: 25 });
+      setLeadCalls(data.calls || []);
+    } catch {
+      setLeadCalls([]);
+    } finally {
+      setCallsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (leadId) fetchLeadCalls();
+  }, [leadId]);
+
+  const handleStartAiCall = async () => {
+    setCallActionError(null);
+    setCallActionOk(null);
+    setStartingCall(true);
+    try {
+      const res = await startAiCall(TENANT_ID, String(leadId).trim());
+      setCallActionOk(`Call initiated. ID: ${res.call_id?.slice(0, 8)}…`);
+      await fetchLeadCalls();
+      await fetchLead();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to start call';
+      setCallActionError(msg);
+    } finally {
+      setStartingCall(false);
+    }
+  };
 
   const fetchLead = async () => {
     try {
@@ -189,6 +231,47 @@ export default function LeadDetailPage() {
               </div>
             </div>
 
+            {/* Outbound AI calls (cortex_voice → calls table) */}
+            <div className={card}>
+              <SectionTitle label="Outbound AI calls" />
+              <p className="text-xs text-slate-500 mb-3">
+                Rows from the voice service / backend <code className="text-[10px] bg-slate-100 dark:bg-slate-700 px-1 rounded">calls</code> table for this lead.
+              </p>
+              {callsLoading ? (
+                <p className="text-xs text-slate-400 py-4">Loading calls…</p>
+              ) : leadCalls.length === 0 ? (
+                <p className="text-xs text-slate-400 py-2">No call attempts yet.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-600">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-700/50 text-slate-500 uppercase tracking-wide">
+                      <tr>
+                        <th className="px-3 py-2">Time</th>
+                        <th className="px-3 py-2">Status</th>
+                        <th className="px-3 py-2">Error / summary</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-600">
+                      {leadCalls.map((c) => (
+                        <tr key={c.id}>
+                          <td className="px-3 py-2 text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                            {c.created_at ? new Date(c.created_at).toLocaleString() : '—'}
+                          </td>
+                          <td className="px-3 py-2 font-semibold text-slate-800 dark:text-slate-100">{c.status}</td>
+                          <td className="px-3 py-2 text-slate-500 dark:text-slate-400 max-w-xs truncate" title={c.error_message || c.summary || ''}>
+                            {c.error_message || c.summary || c.outcome || '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <Link href="/calls" className="inline-block mt-3 text-xs font-semibold text-teal-600 dark:text-teal-400 hover:underline">
+                View all calls →
+              </Link>
+            </div>
+
             {/* Call Transcript */}
             {lead.call_transcript && (
               <div className={card}>
@@ -304,7 +387,31 @@ export default function LeadDetailPage() {
             {/* Actions */}
             <div className={card.replace('sm:p-6', '')}>
               <SectionTitle label="Actions" />
+              {callActionError && (
+                <div className="mb-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+                  {callActionError}
+                </div>
+              )}
+              {callActionOk && (
+                <div className="mb-3 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-3 py-2 text-xs text-teal-800 dark:text-teal-200">
+                  {callActionOk}
+                </div>
+              )}
               <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleStartAiCall}
+                  disabled={startingCall}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-slate-900 dark:bg-slate-700 border border-slate-700 dark:border-slate-600 rounded-xl text-sm font-semibold text-white hover:bg-slate-800 dark:hover:bg-slate-600 transition-colors disabled:opacity-50"
+                >
+                  {startingCall ? 'Starting…' : 'Start AI outbound call'}
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                  </svg>
+                </button>
+                <p className="text-[10px] text-slate-400 px-1">
+                  Uses backend <code className="text-[9px]">/v1/calls/start</code> → voice VM. Fails fast with a clear message if the VM is off or voice errors.
+                </p>
                 <Link
                   href="/communications"
                   className="flex items-center justify-between px-4 py-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-100 dark:border-teal-800 rounded-xl text-sm font-semibold text-teal-700 dark:text-teal-400 hover:bg-teal-100 dark:hover:bg-teal-900/30 transition-colors group"
