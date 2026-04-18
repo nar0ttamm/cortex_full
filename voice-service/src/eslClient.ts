@@ -102,7 +102,27 @@ export async function getEslConnection(): Promise<EslConnection> {
 export const getEslConnectionUnsafe = getEslConnection;
 
 /**
- * originate {vars}sofia/gateway/<gateway>/<e164> &park()
+ * Build sofia dial string. Default: `sofia/gateway/<name>/<e164>` (matches `sofia status gateway` name, e.g. `telnyx`).
+ * Override with `SIP_OUTBOUND_DIAL_TEMPLATE` — placeholders: `{gateway}`, `{destination}`, `{caller}`, `{uuid}`.
+ */
+export function buildOutboundDialString(params: {
+  destinationE164: string;
+  gatewayName: string;
+  callerIdE164: string;
+  callUuid: string;
+}): string {
+  const gateway = params.gatewayName.trim();
+  const destination = params.destinationE164.trim();
+  const template = (process.env.SIP_OUTBOUND_DIAL_TEMPLATE || 'sofia/gateway/{gateway}/{destination}').trim();
+  return template
+    .replace(/\{gateway\}/g, gateway)
+    .replace(/\{destination\}/g, destination)
+    .replace(/\{caller\}/g, params.callerIdE164.trim())
+    .replace(/\{uuid\}/g, params.callUuid);
+}
+
+/**
+ * originate {vars}<sofia dial> &park()
  */
 export async function originatePark(params: {
   callUuid: string;
@@ -111,9 +131,18 @@ export async function originatePark(params: {
   gatewayName: string;
 }): Promise<string> {
   const { callUuid, destinationE164, callerIdE164, gatewayName } = params;
-  const dial = `sofia/gateway/${gatewayName}/${destinationE164}`;
+  const dial = buildOutboundDialString({
+    callUuid,
+    destinationE164,
+    callerIdE164,
+    gatewayName,
+  });
   const vars = `{origination_uuid=${callUuid},origination_caller_id_number=${callerIdE164}}`;
   const arg = `${vars}${dial} &park()`;
+
+  if (process.env.VOICE_LOG_ORIGINATE === 'true') {
+    console.log('[eslClient] originate dial:', dial);
+  }
 
   const conn = await getEslConnection();
 
