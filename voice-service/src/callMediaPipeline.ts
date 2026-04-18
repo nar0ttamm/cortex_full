@@ -74,12 +74,17 @@ async function speakText(callId: string, rt: Runtime, text: string, seqRef: { n:
   try {
     const pcm = await synthesizeTelephonyPcm8k(trimmed);
     if (gen !== rt.generation) return;
+    if (pcm.length < 320) {
+      console.warn(`[pipeline:${callId}] TTS PCM very short (${pcm.length} bytes) — check TTS_PROVIDER and API keys`);
+    }
     const wav = pcm16leMonoToWav(pcm, 8000);
     seqRef.n += 1;
     const fp = await writeTempWav(callId, seqRef.n, wav);
     rt.aiSpeaking = true;
     try {
-      await uuidBroadcast(callId, fp, 'aleg');
+      // Outbound to PSTN: audio often needs `bleg` or `both`; `aleg` alone can be silent on some trunks.
+      const leg = (process.env.UUID_BROADCAST_LEG || 'both').trim() as 'aleg' | 'bleg' | 'both';
+      await uuidBroadcast(callId, fp, leg);
     } catch (e) {
       console.warn(`[pipeline:${callId}] uuid_broadcast`, (e as Error).message);
     }

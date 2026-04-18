@@ -1,27 +1,32 @@
 import https from 'https';
 import http from 'http';
+import { synthesizeElevenLabsToPcm16 } from './elevenLabsTts';
+import { downsamplePcm16Mono16kTo8k } from './wavUtil';
 
 /**
  * Voice synthesis (Text-to-Speech).
  *
- * Primary: Deepgram Aura TTS — extremely low cost, low latency, natural voice.
- * Fallback: Google TTS (if GOOGLE_TTS_API_KEY is set).
- *
- * Deepgram Aura pricing: ~$0.015 / 1000 characters (very cheap for short responses).
- * Returns PCM audio buffer at 8000 Hz suitable for telephony (G.711 PCMU).
+ * Providers: deepgram | google | elevenlabs
+ * Returns PCM16 mono at **8000 Hz** for telephony WAV / uuid_broadcast.
  */
 
 export const voiceSynthesis = {
   async synthesize(text: string): Promise<Buffer> {
-    const provider = process.env.TTS_PROVIDER || 'deepgram';
+    const provider = (process.env.TTS_PROVIDER || 'deepgram').trim().toLowerCase();
 
     if (provider === 'deepgram') {
       return synthesizeDeepgram(text);
-    } else if (provider === 'google') {
-      return synthesizeGoogleTTS(text);
-    } else {
-      return synthesizeDeepgram(text);
     }
+    if (provider === 'google') {
+      return synthesizeGoogleTTS(text);
+    }
+    if (provider === 'elevenlabs') {
+      const { pcm, sampleRate } = await synthesizeElevenLabsToPcm16(text);
+      if (sampleRate === 8000) return pcm;
+      if (sampleRate === 16000) return downsamplePcm16Mono16kTo8k(pcm);
+      return downsamplePcm16Mono16kTo8k(pcm);
+    }
+    return synthesizeDeepgram(text);
   },
 };
 
