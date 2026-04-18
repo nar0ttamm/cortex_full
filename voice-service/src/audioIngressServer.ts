@@ -19,6 +19,12 @@ export function registerAudioConsumer(callId: string, onPcm: (buf: Buffer) => vo
 }
 
 function getIngressSecret(): string | undefined {
+  // Set AUDIO_INGRESS_REQUIRE_TOKEN=false to omit ?token= on the WS URL (fixes some FS/ESL parsers).
+  // Prefer locking port 5000 to localhost / VPN if you disable token (public 5000 + open ingress is unsafe).
+  const requireToken = (process.env.AUDIO_INGRESS_REQUIRE_TOKEN ?? 'true').trim().toLowerCase();
+  if (requireToken === 'false' || requireToken === '0' || requireToken === 'no') {
+    return undefined;
+  }
   return (process.env.AUDIO_INGRESS_SECRET || process.env.VOICE_SECRET || '').trim() || undefined;
 }
 

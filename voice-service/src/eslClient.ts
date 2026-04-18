@@ -217,6 +217,15 @@ export async function uuidBreak(callUuid: string): Promise<string> {
  * Stream call audio to Node via WebSocket (`mod_audio_fork`).
  * Requires FreeSWITCH build with audio fork support and reachable `wsUrl` from the FS container/host.
  */
+/**
+ * ESL passes the uuid_audio_fork args as one string; unquoted `?token=` can break parsing ("-ERR no reply").
+ * Wrap the WebSocket URL in double quotes when it contains ? or &.
+ */
+function quoteWsUrlForEsl(wsUrl: string): string {
+  if (!/[?&]/.test(wsUrl)) return wsUrl;
+  return `"${wsUrl.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
 export async function uuidAudioForkStart(params: {
   callUuid: string;
   wsUrl: string;
@@ -224,7 +233,7 @@ export async function uuidAudioForkStart(params: {
 }): Promise<string> {
   const { callUuid, wsUrl, mix } = params;
   const conn = await getEslConnection();
-  const arg = `${callUuid} start ${wsUrl} ${mix}`;
+  const arg = `${callUuid} start ${quoteWsUrlForEsl(wsUrl)} ${mix}`;
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('ESL uuid_audio_fork start timeout')), ESL_API_MS);
     conn.api('uuid_audio_fork', arg, (evt: EslEvent) => {
