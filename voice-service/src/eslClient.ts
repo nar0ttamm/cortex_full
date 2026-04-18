@@ -215,11 +215,9 @@ export async function uuidBreak(callUuid: string): Promise<string> {
 
 /**
  * Stream call audio to Node via WebSocket (`mod_audio_fork`).
- * Requires FreeSWITCH build with audio fork support and reachable `wsUrl` from the FS container/host.
- */
-/**
- * ESL passes the uuid_audio_fork args as one string; unquoted `?token=` can break parsing ("-ERR no reply").
- * Wrap the WebSocket URL in double quotes when it contains ? or &.
+ * drachtio README: `uuid_audio_fork <uuid> start <url> <mix-type> <sampling-rate> [metadata]`
+ * e.g. mix arg tail: `mono 16k` — see `AUDIO_FORK_MIX` in callMediaPipeline.
+ * ESL: unquoted `?token=` can break parsing; wrap URL in double quotes when it contains ? or &.
  */
 function quoteWsUrlForEsl(wsUrl: string): string {
   if (!/[?&]/.test(wsUrl)) return wsUrl;

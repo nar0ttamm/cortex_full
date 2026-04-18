@@ -231,7 +231,9 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
       );
     }
     console.log(`[pipeline:${callId}] uuid_audio_fork ws: ${wsUrl.split('?')[0]}…`);
-    const mix = (process.env.AUDIO_FORK_MIX || 'mono@16000h').trim();
+    // drachtio mod_audio_fork API: `uuid_audio_fork <uuid> start <url> <mix-type> <rate> [metadata]`
+    // mix-type: mono | mixed | stereo — rate: 8k | 16k (NOT mono@16000h; that form breaks the parser → -ERR no reply)
+    const mix = (process.env.AUDIO_FORK_MIX || 'mono 16k').trim();
     await uuidAudioForkStart({ callUuid: callId, wsUrl, mix });
     metricVoice(callId, 'answer_to_audio_fork', Date.now() - answeredAt);
   } catch (e: unknown) {
