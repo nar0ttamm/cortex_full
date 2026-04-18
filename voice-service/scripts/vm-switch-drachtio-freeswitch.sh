@@ -38,8 +38,13 @@ docker run -d --name freeswitch --restart unless-stopped --network host \
   -e ESL_PASSWORD="$ESL_PASS" \
   "$IMAGE"
 
-echo "Waiting for FreeSWITCH + Sofia..."
-sleep 14
+echo "Waiting for FreeSWITCH + ESL (can take 20–40s on first boot)..."
+for _ in $(seq 1 45); do
+  if docker exec freeswitch fs_cli -H 127.0.0.1 -P 8021 -p "$ESL_PASS" -x 'status' 2>/dev/null | grep -q 'FreeSWITCH.*is ready'; then
+    break
+  fi
+  sleep 1
+done
 
 docker exec freeswitch fs_cli -H 127.0.0.1 -P 8021 -p "$ESL_PASS" -x 'reloadxml'
 docker exec freeswitch fs_cli -H 127.0.0.1 -P 8021 -p "$ESL_PASS" -x 'sofia profile external rescan reload'
