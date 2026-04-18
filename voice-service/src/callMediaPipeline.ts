@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { speechRecognition } from './speechRecognition';
-import { conversationEngine } from './conversationEngine';
+import { conversationEngine, hasLlmConfigured } from './conversationEngine';
 import { synthesizeTelephonyPcm8k } from './voiceSynthesis';
 import { registerAudioConsumer, buildAudioIngressUrl } from './audioIngressServer';
 import { uuidAudioForkStart, uuidAudioForkStop, uuidBroadcast, uuidBreak, uuidKill } from './eslClient';
@@ -121,8 +121,8 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     console.log(`[pipeline:${callId}] VOICE_REALTIME_PIPELINE=false — skipping AI pipeline`);
     return;
   }
-  if (!process.env.DEEPGRAM_API_KEY || !process.env.GEMINI_API_KEY) {
-    console.error(`[pipeline:${callId}] Missing DEEPGRAM_API_KEY or GEMINI_API_KEY — cannot start pipeline`);
+  if (!process.env.DEEPGRAM_API_KEY || !hasLlmConfigured()) {
+    console.error(`[pipeline:${callId}] Missing DEEPGRAM_API_KEY or LLM keys (GEMINI_API_KEY / OPENAI_API_KEY per LLM_PROVIDER) — cannot start pipeline`);
     return;
   }
   if (pipelines.has(callId)) return;
