@@ -8,9 +8,12 @@ const esl = require('modesl') as {
   Connection: new (host: string, port: number, password: string, cb?: () => void) => EslConnection;
 };
 
+/** modesl `Connection` — typed loosely for `events` / ESL event payloads. */
 interface EslConnection {
   connected(): boolean;
-  on(event: string, cb: (err?: Error) => void): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(event: string, cb: (...args: any[]) => void): void;
+  events(format: string, events: string, cb: () => void): void;
   api(command: string, args: string, cb: (evt: EslEvent) => void): void;
   api(command: string, cb: (evt: EslEvent) => void): void;
 }
@@ -79,7 +82,7 @@ export async function getEslConnection(): Promise<EslConnection> {
       });
     });
 
-    conn.on('error', (err?: Error) => {
+    conn.on('error', (err: Error) => {
       done(() => {
         connection = null;
         reject(err || new Error('ESL socket error'));
@@ -95,41 +98,22 @@ export async function getEslConnection(): Promise<EslConnection> {
   return pendingConnect;
 }
 
+/** Alias for subscribers that need the shared ESL socket (e.g. `eslVoiceHooks`). */
+export const getEslConnectionUnsafe = getEslConnection;
+
 /**
- * Outbound originate: answered leg runs a dialplan app until we drive media via ESL.
- *
- * - Default `FREESWITCH_ORIGINATE_APP=playback(silence_stream://-1)` keeps RTP in an active
- *   “conversation-ready” state (not parked). We `uuid_break` before the first TTS.
- * - Set `FREESWITCH_ORIGINATE_APP=park()` to use classic park (uuid_broadcast still works on many builds).
- *
- * Extra chan vars: `FREESWITCH_ORIGINATE_EXTRA_VARS` (comma-separated), e.g. `ignore_early_media=true`
+ * originate {vars}sofia/gateway/<gateway>/<e164> &park()
  */
-const DEFAULT_ORIGINATE_APP = 'playback(silence_stream://-1)';
-
-function buildOriginateArg(params: {
-  callUuid: string;
-  destinationE164: string;
-  callerIdE164: string;
-  gatewayName: string;
-}): string {
-  const { callUuid, destinationE164, callerIdE164, gatewayName } = params;
-  const dial = `sofia/gateway/${gatewayName}/${destinationE164}`;
-  const extra = (process.env.FREESWITCH_ORIGINATE_EXTRA_VARS || 'ignore_early_media=true').trim();
-  const base = `origination_uuid=${callUuid},origination_caller_id_number=${callerIdE164}`;
-  const varInner = extra ? `${base},${extra}` : base;
-  const vars = `{${varInner}}`;
-  const appRaw = (process.env.FREESWITCH_ORIGINATE_APP || DEFAULT_ORIGINATE_APP).trim();
-  const app = appRaw.startsWith('&') ? appRaw.slice(1).trim() : appRaw;
-  return `${vars}${dial} &${app}`;
-}
-
 export async function originatePark(params: {
   callUuid: string;
   destinationE164: string;
   callerIdE164: string;
   gatewayName: string;
 }): Promise<string> {
-  const arg = buildOriginateArg(params);
+  const { callUuid, destinationE164, callerIdE164, gatewayName } = params;
+  const dial = `sofia/gateway/${gatewayName}/${destinationE164}`;
+  const vars = `{origination_uuid=${callUuid},origination_caller_id_number=${callerIdE164}}`;
+  const arg = `${vars}${dial} &park()`;
 
   const conn = await getEslConnection();
 
@@ -167,49 +151,14 @@ export async function uuidKill(callUuid: string): Promise<string> {
   });
 }
 
-/**
- * Stream call audio to a WebSocket URL (requires mod_audio_fork loaded in FreeSWITCH).
- * @param mix e.g. mono@16000h for PCM16 mono 16 kHz (good for Deepgram / Phase D)
- */
-export async function uuidAudioForkStart(params: {
-  callUuid: string;
-  wsUrl: string;
-  mix?: string;
-}): Promise<string> {
-  const { callUuid, wsUrl } = params;
-  const mix = (params.mix || 'mono@16000h').trim();
-  const arg = `${callUuid} start ${wsUrl} ${mix}`;
+/** Play WAV file to call leg (`aleg` = customer on outbound). */
+export async function uuidBroadcast(
+  callUuid: string,
+  filePath: string,
+  leg: 'aleg' | 'bleg' | 'both' = 'aleg'
+): Promise<string> {
   const conn = await getEslConnection();
-
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('ESL uuid_audio_fork timeout')), ESL_API_MS);
-    conn.api('uuid_audio_fork', arg, (evt: EslEvent) => {
-      clearTimeout(t);
-      const body = (evt.getBody() || '').trim();
-      if (body.startsWith('-ERR')) reject(new Error(body));
-      else resolve(body);
-    });
-  });
-}
-
-export async function uuidAudioForkStop(callUuid: string): Promise<string> {
-  const arg = `${callUuid} stop`;
-  const conn = await getEslConnection();
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('ESL uuid_audio_fork stop timeout')), ESL_API_MS);
-    conn.api('uuid_audio_fork', arg, (evt: EslEvent) => {
-      clearTimeout(t);
-      const body = (evt.getBody() || '').trim();
-      if (body.startsWith('-ERR')) reject(new Error(body));
-      else resolve(body);
-    });
-  });
-}
-
-/** Play a WAV file to the call leg (requires path visible to FreeSWITCH). */
-export async function uuidBroadcast(callUuid: string, wavPath: string, leg: 'aleg' | 'bleg' | 'both' = 'aleg'): Promise<string> {
-  const arg = `${callUuid} ${wavPath} ${leg}`;
-  const conn = await getEslConnection();
+  const arg = `${callUuid} ${filePath} ${leg}`;
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('ESL uuid_broadcast timeout')), ESL_API_MS);
     conn.api('uuid_broadcast', arg, (evt: EslEvent) => {
@@ -221,13 +170,12 @@ export async function uuidBroadcast(callUuid: string, wavPath: string, leg: 'ale
   });
 }
 
-/** Stop in-progress playback / break out of media (barge-in). */
-export async function uuidBreak(callUuid: string, scope: 'all' | 'media' = 'all'): Promise<string> {
-  const arg = `${callUuid} ${scope}`;
+/** Stop current playback on the channel (used for barge-in). */
+export async function uuidBreak(callUuid: string): Promise<string> {
   const conn = await getEslConnection();
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('ESL uuid_break timeout')), ESL_API_MS);
-    conn.api('uuid_break', arg, (evt: EslEvent) => {
+    conn.api('uuid_break', callUuid, (evt: EslEvent) => {
       clearTimeout(t);
       const body = (evt.getBody() || '').trim();
       if (body.startsWith('-ERR')) reject(new Error(body));
@@ -237,10 +185,38 @@ export async function uuidBreak(callUuid: string, scope: 'all' | 'media' = 'all'
 }
 
 /**
- * Raw modesl connection for event subscription (CHANNEL_ANSWER, etc.).
- * Same singleton as api() — do not disconnect from here.
+ * Stream call audio to Node via WebSocket (`mod_audio_fork`).
+ * Requires FreeSWITCH build with audio fork support and reachable `wsUrl` from the FS container/host.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function getEslConnectionUnsafe(): Promise<any> {
-  return getEslConnection();
+export async function uuidAudioForkStart(params: {
+  callUuid: string;
+  wsUrl: string;
+  mix: string;
+}): Promise<string> {
+  const { callUuid, wsUrl, mix } = params;
+  const conn = await getEslConnection();
+  const arg = `${callUuid} start ${wsUrl} ${mix}`;
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('ESL uuid_audio_fork start timeout')), ESL_API_MS);
+    conn.api('uuid_audio_fork', arg, (evt: EslEvent) => {
+      clearTimeout(t);
+      const body = (evt.getBody() || '').trim();
+      if (body.startsWith('-ERR')) reject(new Error(body));
+      else resolve(body);
+    });
+  });
+}
+
+export async function uuidAudioForkStop(callUuid: string): Promise<string> {
+  const conn = await getEslConnection();
+  const arg = `${callUuid} stop`;
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('ESL uuid_audio_fork stop timeout')), ESL_API_MS);
+    conn.api('uuid_audio_fork', arg, (evt: EslEvent) => {
+      clearTimeout(t);
+      const body = (evt.getBody() || '').trim();
+      if (body.startsWith('-ERR')) reject(new Error(body));
+      else resolve(body);
+    });
+  });
 }

@@ -6,10 +6,9 @@ import Link from 'next/link';
 import { Lead } from '@/types';
 import { AppShell } from '../../components/AppShell';
 import { fetchCallsForTenant, startAiCall, type CallRow } from '@/lib/callsApi';
-import { DEFAULT_TENANT_ID } from '@/lib/tenantConfig';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
-const TENANT_ID = DEFAULT_TENANT_ID;
+const TENANT_ID = process.env.NEXT_PUBLIC_DEFAULT_TENANT_ID || 'b50750c7-0a91-4cd4-80fa-8921f974a8ec';
 
 interface Note {
   id: string;
@@ -68,7 +67,7 @@ export default function LeadDetailPage() {
     setCallActionOk(null);
     setStartingCall(true);
     try {
-      const res = await startAiCall(TENANT_ID, String(leadId).trim());
+      const res = await startAiCall(TENANT_ID, leadId);
       setCallActionOk(`Call initiated. ID: ${res.call_id?.slice(0, 8)}…`);
       await fetchLeadCalls();
       await fetchLead();

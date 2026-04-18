@@ -3,8 +3,9 @@ import dns from 'node:dns/promises';
 // default export is `parse`; helpers are attached (parseIntoClientConfig)
 import connParse from 'pg-connection-string';
 
-/** Last URL we built a pool for — invalidates pool when .env / env changes (e.g. after deploy). */
-let poolUrlSeen = '';
+const dbUrl = process.env.DATABASE_URL || '';
+const useSsl =
+  dbUrl.includes('supabase.co') || dbUrl.includes('supabase.com') || process.env.DATABASE_SSL === 'true';
 
 let poolPromise: Promise<Pool> | null = null;
 
@@ -12,29 +13,7 @@ function isIpv4Literal(host: string): boolean {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
 }
 
-/** Prefer IPv4 so GCP VMs without IPv6 route do not hit ENETUNREACH on AAAA. */
-async function resolveFirstIpv4(host: string): Promise<string | null> {
-  if (isIpv4Literal(host)) return host;
-  try {
-    const r = await dns.lookup(host, { family: 4 });
-    return r.address;
-  } catch {
-    try {
-      const addrs = await dns.resolve4(host);
-      return addrs[0] ?? null;
-    } catch {
-      return null;
-    }
-  }
-}
-
 async function getPool(): Promise<Pool> {
-  const dbUrl = (process.env.DATABASE_URL || '').trim();
-  if (dbUrl !== poolUrlSeen) {
-    poolUrlSeen = dbUrl;
-    poolPromise = null;
-  }
-
   if (poolPromise) return poolPromise;
 
   poolPromise = (async () => {
@@ -42,53 +21,31 @@ async function getPool(): Promise<Pool> {
       throw new Error('DATABASE_URL is not set');
     }
 
-    const useSsl =
-      dbUrl.includes('supabase.co') ||
-      dbUrl.includes('supabase.com') ||
-      process.env.DATABASE_SSL === 'true';
-
     const clientConfig = connParse.parseIntoClientConfig(dbUrl) as PoolConfig;
     const host = clientConfig.host;
     if (!host) {
       throw new Error('DATABASE_URL has no host');
     }
 
-    // Direct db.* host is IPv6-first; no A record on many projects → IPv4-only VMs cannot connect.
-    if (host.startsWith('db.') && host.includes('supabase.co') && !host.includes('pooler')) {
-      throw new Error(
-        `DATABASE_URL uses direct host "${host}" (IPv6-first). On GCP use the pooler URI from Supabase Dashboard → Connect ` +
-          `(Session or Transaction, *.pooler.supabase.com), or enable the IPv4 add-on for direct access.`
-      );
-    }
-
-    const isPooler = host.includes('pooler.supabase.com');
     let connectHost = host;
-    let ssl: PoolConfig['ssl'] | undefined;
-
-    if (useSsl) {
-      ssl = { rejectUnauthorized: false };
-    }
-
     if (!isIpv4Literal(host) && !host.includes(':')) {
-      const v4 = await resolveFirstIpv4(host);
-      if (v4) {
-        connectHost = v4;
-        if (isPooler && ssl && typeof ssl === 'object') {
-          ssl = { ...ssl, servername: host };
+      try {
+        const v4 = await dns.resolve4(host);
+        if (!v4?.length) {
+          throw new Error('resolve4 returned no addresses');
         }
-      } else if (isPooler) {
-        // Do not pass hostname through to pg on IPv4-only VMs: DNS may prefer AAAA → ENETUNREACH.
+        connectHost = v4[0];
+      } catch (e) {
         throw new Error(
-          `Could not resolve "${host}" to IPv4. Check VM DNS/outbound UDP 53 and DATABASE_URL (Session pooler URI).`
-        );
-      } else {
-        throw new Error(
-          `No IPv4 address for "${host}". Use Supabase pooler host (*.pooler.supabase.com) in DATABASE_URL.`
+          `No IPv4 (A record) for DB host "${host}": ${(e as Error).message}. ` +
+            `Use Supabase "Session pooler" / Transaction pool connection string (port 6543), or fix DNS.`
         );
       }
     }
 
-    console.log('[callStorage] postgres connect host:', connectHost === host ? host : `${connectHost} (SNI ${host})`);
+    if (useSsl) {
+      clientConfig.ssl = { rejectUnauthorized: false };
+    }
 
     return new Pool({
       user: clientConfig.user,
@@ -96,7 +53,7 @@ async function getPool(): Promise<Pool> {
       host: connectHost,
       port: clientConfig.port ?? 5432,
       database: clientConfig.database ?? undefined,
-      ssl,
+      ssl: clientConfig.ssl,
       application_name: clientConfig.application_name,
       max: 10,
       connectionTimeoutMillis: 12000,

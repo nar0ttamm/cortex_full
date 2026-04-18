@@ -1,5 +1,14 @@
 // TypeScript types for the CRM
 
+/** Live call strip from backend `/v1/calls/event` (voice phases) */
+export interface ActiveCallMeta {
+  call_id?: string;
+  phase?: string;
+  label?: string;
+  detail?: string | null;
+  updated_at?: string;
+}
+
 export interface Lead {
   id?: string;
   timestamp?: string;
@@ -19,6 +28,11 @@ export interface Lead {
   reminder_3hr_sent?: boolean;
   last_update?: string;
   location?: string;
+  /** ISO time for scheduled outbound AI call (metadata.scheduled_call_at) */
+  scheduled_call_at?: string | null;
+  /** True after dial started or completed */
+  call_initiated?: boolean;
+  active_call?: ActiveCallMeta | null;
   metadata?: {
     calling_mode?: string;
     [key: string]: any;

@@ -8,7 +8,7 @@ import { registerAudioConsumer, buildAudioIngressUrl } from './audioIngressServe
 import { uuidAudioForkStart, uuidAudioForkStop, uuidBroadcast, uuidBreak, uuidKill } from './eslClient';
 import { callStorage } from './callStorage';
 import { sessionStore } from './sessionStore';
-import { notifyBackendCallResult } from './backendNotify';
+import { notifyBackendCallResult, notifyBackendCallEvent } from './backendNotify';
 import { pcm16leMonoToWav } from './wavUtil';
 import { metricVoice } from './voiceCallMetrics';
 
@@ -116,6 +116,12 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
 
   await callStorage.updateCallStatus(callId, 'active');
   await callStorage.logEvent(callId, 'call_answered', { source: 'esl' });
+  void notifyBackendCallEvent({
+    tenant_id: ctx.tenant_id,
+    lead_id: ctx.lead_id,
+    call_id: callId,
+    phase: 'ongoing',
+  });
 
   const seqRef = { n: 0 };
   const conversationHistory: Message[] = [];

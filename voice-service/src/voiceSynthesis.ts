@@ -1,46 +1,29 @@
 import https from 'https';
-import { synthesizeElevenLabsToPcm16 } from './elevenLabsTts';
-import { downsamplePcm16Mono16kTo8k } from './wavUtil';
+import http from 'http';
 
 /**
- * TTS for telephony playback (PCM16 mono 8 kHz linear) — uuid_broadcast WAV.
- * Phase D default: ElevenLabs (stream collected to buffer). Optional: Deepgram Aura, Google.
+ * Voice synthesis (Text-to-Speech).
+ *
+ * Primary: Deepgram Aura TTS — extremely low cost, low latency, natural voice.
+ * Fallback: Google TTS (if GOOGLE_TTS_API_KEY is set).
+ *
+ * Deepgram Aura pricing: ~$0.015 / 1000 characters (very cheap for short responses).
+ * Returns PCM audio buffer at 8000 Hz suitable for telephony (G.711 PCMU).
  */
 
-export async function synthesizeTelephonyPcm8k(text: string): Promise<Buffer> {
-  let provider = (process.env.TTS_PROVIDER || 'elevenlabs').toLowerCase().trim();
-  if (
-    provider === 'elevenlabs' &&
-    !(process.env.ELEVENLABS_API_KEY || '').trim() &&
-    (process.env.DEEPGRAM_API_KEY || '').trim()
-  ) {
-    console.warn('[voiceSynthesis] ELEVENLABS_API_KEY missing — using Deepgram Aura for telephony PCM');
-    provider = 'deepgram';
-  }
-  if (provider === 'elevenlabs') {
-    const { pcm, sampleRate } = await synthesizeElevenLabsToPcm16(text);
-    if (sampleRate === 8000) return pcm;
-    if (sampleRate === 16000) return downsamplePcm16Mono16kTo8k(pcm);
-    throw new Error(
-      `ElevenLabs sample rate ${sampleRate} Hz is not supported for telephony; set ELEVENLABS_OUTPUT_FORMAT=pcm_16000`
-    );
-  }
-  return synthesizeLegacyPcm8k(text, provider);
-}
-
-/** @deprecated for new code — use synthesizeTelephonyPcm8k */
 export const voiceSynthesis = {
   async synthesize(text: string): Promise<Buffer> {
-    return synthesizeTelephonyPcm8k(text);
+    const provider = process.env.TTS_PROVIDER || 'deepgram';
+
+    if (provider === 'deepgram') {
+      return synthesizeDeepgram(text);
+    } else if (provider === 'google') {
+      return synthesizeGoogleTTS(text);
+    } else {
+      return synthesizeDeepgram(text);
+    }
   },
 };
-
-async function synthesizeLegacyPcm8k(text: string, provider: string): Promise<Buffer> {
-  if (provider === 'google') {
-    return synthesizeGoogleTTS(text);
-  }
-  return synthesizeDeepgram(text);
-}
 
 async function synthesizeDeepgram(text: string): Promise<Buffer> {
   const apiKey = process.env.DEEPGRAM_API_KEY;
@@ -53,13 +36,13 @@ async function synthesizeDeepgram(text: string): Promise<Buffer> {
       path: '/v1/speak?model=aura-asteria-en&encoding=linear16&sample_rate=8000',
       method: 'POST',
       headers: {
-        Authorization: `Token ${apiKey}`,
+        'Authorization': `Token ${apiKey}`,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
       },
     };
 
-    const req = https.request(options, res => {
+    const req = https.request(options, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', chunk => chunks.push(chunk));
       res.on('end', () => resolve(Buffer.concat(chunks)));
@@ -93,17 +76,15 @@ async function synthesizeGoogleTTS(text: string): Promise<Buffer> {
       },
     };
 
-    const req = https.request(options, res => {
+    const req = https.request(options, (res) => {
       let data = '';
-      res.on('data', chunk => {
-        data += chunk;
-      });
+      res.on('data', chunk => { data += chunk; });
       res.on('end', () => {
         try {
           const parsed = JSON.parse(data);
           const audioContent = parsed.audioContent;
           resolve(Buffer.from(audioContent, 'base64'));
-        } catch {
+        } catch (err) {
           reject(new Error('Failed to parse Google TTS response'));
         }
       });
@@ -113,4 +94,9 @@ async function synthesizeGoogleTTS(text: string): Promise<Buffer> {
     req.write(body);
     req.end();
   });
+}
+
+/** PCM16 mono 8 kHz linear16 for telephony WAV / `uuid_broadcast` (see `callMediaPipeline`). */
+export async function synthesizeTelephonyPcm8k(text: string): Promise<Buffer> {
+  return voiceSynthesis.synthesize(text);
 }

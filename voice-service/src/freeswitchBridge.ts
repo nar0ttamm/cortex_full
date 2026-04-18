@@ -6,19 +6,20 @@ import { callStorage } from './callStorage';
 import { originatePark, uuidKill } from './eslClient';
 import { normalizeToE164 } from './phoneE164';
 import { beginEslCallPipeline, stopEslCallPipeline } from './callMediaPipeline';
-import { notifyBackendCallResult } from './backendNotify';
 
 /**
- * FreeSWITCH ESL bridge: outbound calls via Telnyx; on answer, realtime STT → Gemini → TTS → broadcast.
+ * FreeSWITCH ESL bridge: real outbound calls via Telnyx gateway when USE_ESL_ORIGINATE is enabled.
+ * Full RTP ↔ STT/TTS pipeline is still TODO; with ESL enabled we only originate & park to avoid
+ * burning Deepgram/Gemini without real media.
  */
 
 interface OriginateOptions {
   callId: string;
+  tenant_id: string;
+  lead_id: string;
   phone: string;
   name: string;
   callScript?: string;
-  tenant_id: string;
-  lead_id: string;
 }
 
 function useEslOriginate(): boolean {
@@ -43,7 +44,7 @@ class FreeswitchBridge extends EventEmitter {
   }
 
   async originateCall(opts: OriginateOptions): Promise<void> {
-    const { callId, phone, name, callScript, tenant_id, lead_id } = opts;
+    const { callId, tenant_id, lead_id, phone, name, callScript } = opts;
 
     console.log(`[FreeSWITCH] Originating call ${callId} to ${phone}`);
 
@@ -69,25 +70,24 @@ class FreeswitchBridge extends EventEmitter {
       console.log(`[FreeSWITCH] ESL originate OK: ${fsReply}`);
       await callStorage.updateCallStatus(callId, 'ringing');
       this.activeCalls.set(callId, {
+        tenant_id,
+        lead_id,
         phone: dest,
         name,
         callScript,
-        tenant_id,
-        lead_id,
         startTime: Date.now(),
         esl: true,
-        pipelineStarted: false,
       });
       return;
     }
 
     // Simulated mode (no FreeSWITCH dial): runs stub AI pipeline for local dev only
     this.activeCalls.set(callId, {
+      tenant_id,
+      lead_id,
       phone,
       name,
       callScript,
-      tenant_id,
-      lead_id,
       startTime: Date.now(),
       conversationHistory: [],
       esl: false,
@@ -103,8 +103,6 @@ class FreeswitchBridge extends EventEmitter {
     console.log(`[FreeSWITCH] Hanging up call ${callId}`);
     const ctx = this.activeCalls.get(callId);
 
-    await stopEslCallPipeline(callId, 'ended_by_api').catch(() => {});
-
     if (useEslOriginate() && ctx?.esl) {
       try {
         await uuidKill(callId);
@@ -116,12 +114,11 @@ class FreeswitchBridge extends EventEmitter {
     this.activeCalls.delete(callId);
   }
 
-  /** ESL CHANNEL_ANSWER — start realtime pipeline when leg matches an outbound call we originated. */
-  onChannelAnswer(uuid: string): void {
-    const ctx = this.activeCalls.get(uuid);
-    if (!ctx?.esl || ctx.pipelineStarted) return;
-    ctx.pipelineStarted = true;
-    void beginEslCallPipeline(uuid, {
+  /** ESL `CHANNEL_ANSWER` — start realtime STT → LLM → TTS pipeline when `VOICE_REALTIME_PIPELINE` is enabled. */
+  onChannelAnswer(callUuid: string): void {
+    const ctx = this.activeCalls.get(callUuid);
+    if (!ctx?.esl) return;
+    void beginEslCallPipeline(callUuid, {
       tenant_id: ctx.tenant_id,
       lead_id: ctx.lead_id,
       phone: ctx.phone,
@@ -129,43 +126,15 @@ class FreeswitchBridge extends EventEmitter {
       callScript: ctx.callScript,
       startedAt: ctx.startTime,
       answeredAt: Date.now(),
-    }).catch((err: Error) => {
-      console.error(`[FreeSWITCH] pipeline start ${uuid}:`, err.message);
-      ctx.pipelineStarted = false;
-    });
+    }).catch((err: unknown) =>
+      console.error('[freeswitchBridge] beginEslCallPipeline', err instanceof Error ? err.message : err)
+    );
   }
 
-  /** ESL CHANNEL_HANGUP_COMPLETE — persist + notify; channel is already gone. */
-  onChannelHangupComplete(uuid: string): void {
-    const ctx = this.activeCalls.get(uuid);
-    void (async () => {
-      await stopEslCallPipeline(uuid, ctx ? 'remote_hangup' : 'hangup').catch(() => {});
-      if (ctx?.esl && !ctx.pipelineStarted) {
-        const sec = Math.max(0, Math.floor((Date.now() - ctx.startTime) / 1000));
-        try {
-          await callStorage.updateCallStatus(uuid, 'completed');
-          await callStorage.saveCallResult({
-            call_id: uuid,
-            transcript: '',
-            summary: 'Call ended before AI session started',
-            duration_seconds: sec,
-            outcome: sec < 5 ? 'no_answer' : 'unknown',
-          });
-          await notifyBackendCallResult({
-            tenant_id: ctx.tenant_id,
-            lead_id: ctx.lead_id,
-            call_id: uuid,
-            outcome: sec < 5 ? 'no_answer' : 'unknown',
-            summary: 'Call ended before AI session started',
-            transcript: '',
-            duration_seconds: sec,
-          });
-        } catch (e: unknown) {
-          console.warn(`[FreeSWITCH] missed-call persist ${uuid}:`, e instanceof Error ? e.message : e);
-        }
-      }
-      this.activeCalls.delete(uuid);
-    })();
+  /** ESL `CHANNEL_HANGUP_COMPLETE` — tear down media pipeline and drop session map entry. */
+  onChannelHangupComplete(callUuid: string): void {
+    void stopEslCallPipeline(callUuid, 'hangup').catch(() => {});
+    this.activeCalls.delete(callUuid);
   }
 
   private async _startConversationPipeline(callId: string): Promise<void> {

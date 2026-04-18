@@ -5,12 +5,6 @@ const config = require('../config');
 
 const router = Router();
 
-/** Avoid Postgres "invalid input syntax for type uuid" when env/body has trailing spaces */
-function trimId(v) {
-  if (v == null || v === '') return '';
-  return String(v).trim();
-}
-
 // Voice service secret guard (only voice-service can POST results)
 function requireVoiceSecret(req, res, next) {
   const secret = req.headers['x-voice-secret'];
@@ -23,8 +17,7 @@ function requireVoiceSecret(req, res, next) {
 // POST /v1/calls/start
 // Schedules and initiates an outbound AI call via cortex_voice service
 router.post('/calls/start', asyncHandler(async (req, res) => {
-  const tenant_id = trimId(req.body.tenant_id);
-  const lead_id = trimId(req.body.lead_id);
+  const { tenant_id, lead_id } = req.body;
   if (!tenant_id || !lead_id) {
     return res.status(400).json({ error: 'Missing required fields: tenant_id, lead_id' });
   }
@@ -95,10 +88,7 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
 // POST /v1/calls/result
 // Receives call result from cortex_voice service, updates lead (idempotent per call_id in communications_log)
 router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) => {
-  const tenant_id = trimId(req.body.tenant_id);
-  const lead_id = trimId(req.body.lead_id);
-  const call_id = trimId(req.body.call_id);
-  const { transcript, summary, duration_seconds, outcome } = req.body;
+  const { tenant_id, lead_id, call_id, transcript, summary, duration_seconds, outcome } = req.body;
   if (!tenant_id || !lead_id || !call_id) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
@@ -179,7 +169,7 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
 // GET /v1/calls/:tenantId
 // List calls for a tenant (reads from calls table)
 router.get('/calls/:tenantId', asyncHandler(async (req, res) => {
-  const tenantId = trimId(req.params.tenantId);
+  const { tenantId } = req.params;
   const { limit = 50, status, lead_id: leadId } = req.query;
 
   let query = `
@@ -199,7 +189,7 @@ router.get('/calls/:tenantId', asyncHandler(async (req, res) => {
 
   if (leadId) {
     query += ` AND c.lead_id = $${params.length + 1}`;
-    params.push(trimId(leadId));
+    params.push(leadId);
   }
 
   query += ` ORDER BY c.created_at DESC LIMIT $${params.length + 1}`;

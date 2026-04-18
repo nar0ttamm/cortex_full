@@ -40,14 +40,14 @@ const FIELDS: { key: keyof TenantProfile; label: string; type?: string; placehol
   { key: 'website',           label: 'Website',               placeholder: 'https://yourbusiness.com',        hint: 'Your website URL (optional)', type: 'url' },
   { key: 'business_type',     label: 'Industry / Business Type', placeholder: 'Select industry',             hint: 'Helps personalize AI responses', options: BUSINESS_TYPES },
   { key: 'timezone',          label: 'Timezone',              placeholder: 'Select timezone',                 hint: 'Used for scheduling calls and reminders', options: TIMEZONES },
-  { key: 'call_delay_seconds', label: 'Call Delay (seconds)', placeholder: '120',                            hint: 'Delay before AI calls a new lead (min 60)', type: 'number' },
+  { key: 'call_delay_seconds', label: 'Call Delay (seconds)', placeholder: '60',                             hint: 'Delay before AI calls a new lead (min 60)', type: 'number' },
 ];
 
 export default function TenantPage() {
   const [form, setForm] = useState<TenantProfile>({
     name: '', owner_name: '', contact_email: '', whatsapp_number: '',
     phone_number: '', business_type: '', website: '', timezone: 'Asia/Kolkata',
-    call_delay_seconds: '120',
+    call_delay_seconds: '60',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -74,7 +74,7 @@ export default function TenantPage() {
         business_type:       s.business_type || '',
         website:             s.website || '',
         timezone:            s.timezone || 'Asia/Kolkata',
-        call_delay_seconds:  String(s.call_delay_seconds ?? 120),
+        call_delay_seconds:  String(s.call_delay_seconds ?? 60),
       });
     } catch (e: any) {
       setError(e.message);
@@ -95,7 +95,7 @@ export default function TenantPage() {
           name,
           settings: {
             ...rest,
-            call_delay_seconds: parseInt(rest.call_delay_seconds) || 120,
+            call_delay_seconds: parseInt(rest.call_delay_seconds) || 60,
           },
         }),
       });

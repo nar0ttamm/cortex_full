@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AppShell } from '../components/AppShell';
 import { Lead } from '@/types';
+import { ScheduledCallCountdown } from '@/components/ScheduledCallCountdown';
+import { getEffectiveScheduledCallAt } from '@/lib/scheduledCallDisplay';
 
 export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -13,18 +15,12 @@ export default function LeadsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  useEffect(() => {
-    fetchLeads();
-  }, []);
-
-  useEffect(() => {
-    filterLeads();
-  }, [leads, searchTerm, statusFilter]);
-
-  const fetchLeads = async () => {
+  const fetchLeads = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
 
       const response = await fetch('/api/sheets?action=leads');
       if (response.status === 401) {
@@ -37,8 +33,7 @@ export default function LeadsPage() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Failed to fetch leads' }));
         const errorMessage = errorData.error || 'Failed to fetch leads';
-        
-        // Check if it's an auth error
+
         if (errorMessage.includes('Authentication required') || errorMessage.includes('authentication')) {
           setError('Please sign in to continue.');
           setTimeout(() => {
@@ -46,7 +41,7 @@ export default function LeadsPage() {
           }, 1500);
           return;
         }
-        
+
         throw new Error(errorMessage);
       }
 
@@ -56,9 +51,25 @@ export default function LeadsPage() {
       setError(err.message || 'Failed to load leads');
       console.error('Leads error:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void fetchLeads(false);
+  }, [fetchLeads]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      void fetchLeads(true);
+    }, 8000);
+    return () => clearInterval(id);
+  }, [fetchLeads]);
+
+  useEffect(() => {
+    filterLeads();
+  }, [leads, searchTerm, statusFilter]);
 
   const filterLeads = () => {
     let filtered = [...leads];
@@ -105,7 +116,7 @@ export default function LeadsPage() {
   const actions = (
     <>
       <button
-        onClick={fetchLeads}
+        onClick={() => void fetchLeads(false)}
         disabled={loading}
         className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
       >
@@ -192,6 +203,20 @@ export default function LeadsPage() {
                   {lead.inquiry && (
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 line-clamp-2 pl-12">{lead.inquiry}</p>
                   )}
+                  {(getEffectiveScheduledCallAt(lead) && !lead.call_initiated) || lead.active_call?.label ? (
+                    <div className="mt-2 pl-12 flex flex-wrap items-center gap-2">
+                      {lead.active_call?.label && (
+                        <span className="text-[11px] font-semibold text-teal-600 dark:text-teal-400">{lead.active_call.label}</span>
+                      )}
+                      {getEffectiveScheduledCallAt(lead) && !lead.call_initiated && (
+                        <ScheduledCallCountdown
+                          compact
+                          scheduledAtIso={getEffectiveScheduledCallAt(lead)!}
+                          callInitiated={!!lead.call_initiated}
+                        />
+                      )}
+                    </div>
+                  ) : null}
                 </Link>
               ))}
             </div>
@@ -206,7 +231,7 @@ export default function LeadsPage() {
                       <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Contact</th>
                       <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hidden lg:table-cell">Inquiry</th>
                       <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
-                      <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hidden xl:table-cell">Call</th>
+                      <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hidden xl:table-cell">AI call</th>
                       <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hidden xl:table-cell">Appt</th>
                       <th className="px-5 py-3" />
                     </tr>
@@ -231,9 +256,19 @@ export default function LeadsPage() {
                           </span>
                         </td>
                         <td className="px-5 py-3.5 hidden xl:table-cell">
-                          <span className={`text-xs font-medium ${getCallStatusColor(lead.ai_call_status || '')}`}>
-                            {lead.ai_call_status || 'Pending'}
-                          </span>
+                          {lead.active_call?.label ? (
+                            <span className="text-xs font-semibold text-teal-600 dark:text-teal-400">{lead.active_call.label}</span>
+                          ) : getEffectiveScheduledCallAt(lead) && !lead.call_initiated ? (
+                            <ScheduledCallCountdown
+                              compact
+                              scheduledAtIso={getEffectiveScheduledCallAt(lead)!}
+                              callInitiated={!!lead.call_initiated}
+                            />
+                          ) : (
+                            <span className={`text-xs font-medium ${getCallStatusColor(lead.ai_call_status || '')}`}>
+                              {lead.ai_call_status || 'Pending'}
+                            </span>
+                          )}
                         </td>
                         <td className="px-5 py-3.5 hidden xl:table-cell">
                           <span className="text-xs text-slate-500">

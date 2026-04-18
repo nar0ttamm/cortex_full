@@ -25,8 +25,15 @@ router.post('/lead/ingest', asyncHandler(async (req, res) => {
     return res.json({ status: 'duplicate', lead: existing.rows[0] });
   }
 
-  // Schedule call 2 minutes from now
-  const scheduledCallAt = new Date(Date.now() + config.callDelaySeconds * 1000).toISOString();
+  const tenantResult = await db.query('SELECT settings FROM tenants WHERE id = $1', [tenant_id]);
+  const fromSettings = tenantResult.rows[0]?.settings?.call_delay_seconds;
+  const parsed = fromSettings != null ? parseInt(String(fromSettings), 10) : config.callDelaySeconds;
+  const baseDelay =
+    Number.isFinite(parsed) && parsed >= 60 ? parsed : config.callDelaySeconds;
+  /** Product default: first outbound AI call 60s after lead ingest (ignore tenant values above 60 unless raised later). */
+  const callDelaySeconds = Math.min(baseDelay, 60);
+
+  const scheduledCallAt = new Date(Date.now() + callDelaySeconds * 1000).toISOString();
 
   const initialMetadata = {
     scheduled_call_at: scheduledCallAt,

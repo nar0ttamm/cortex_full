@@ -32,3 +32,17 @@ export async function notifyBackendCallResult(payload: {
     body: JSON.stringify(body),
   }).catch((e: Error) => console.error('[backendNotify]', e.message));
 }
+
+/** Mid-call phase (e.g. answered). Extend backend with a dedicated route when CRM live status is needed. */
+export async function notifyBackendCallEvent(payload: {
+  tenant_id: string;
+  lead_id: string;
+  call_id: string;
+  phase: string;
+}): Promise<void> {
+  if (!process.env.BACKEND_URL?.trim()) {
+    console.log('[backendNotify:event]', payload.call_id, payload.phase);
+    return;
+  }
+  console.log('[backendNotify:event]', payload.call_id, payload.phase, 'lead=', payload.lead_id);
+}

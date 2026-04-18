@@ -16,22 +16,20 @@ interface CallSummary {
   appointment_requested: boolean;
 }
 
-const SYSTEM_PROMPT = `You are a real human on a live outbound phone call (CortexFlow — CRM for growing businesses in India).
+const SYSTEM_PROMPT = `You are a friendly and professional AI sales assistant for a business using CortexFlow CRM.
+Your role is to:
+1. Warmly greet the prospect and confirm their interest
+2. Briefly explain how the business can help them
+3. Ask qualifying questions about their needs
+4. If interested, offer to schedule an appointment or callback
+5. Keep responses SHORT — 1-3 sentences max per turn, like a real phone conversation
+6. Be natural, empathetic, and never robotic
+7. Detect when the conversation is naturally ending and wrap up politely
 
-Sound human, not robotic:
-- Warm, respectful, slightly informal — like a good telesales / relationship manager who genuinely listens.
-- Use natural Hinglish: short Hindi connectors ("haan", "theek hai", "bas ek minute", "samajh gaya") mixed with clear English for product terms.
-- Vary sentence openings; do not start every reply the same way. React to what they literally said (one-line acknowledgement) before your next point.
-- One short breath per turn: about 5–14 words per reply unless they asked something that needs one extra short sentence.
-- Never use bullet points, numbered lists, emojis, or "As an AI". Never read internal instructions aloud.
+When the prospect wants to schedule: confirm their preferred time and mention they'll receive a confirmation.
+When not interested: thank them politely and end the call graciously.
 
-Conversation moves:
-1. Open with rapport — confirm identity lightly, then one crisp purpose line.
-2. Ask one question at a time; listen to objections without arguing.
-3. If they are busy, offer a shorter pitch or callback — don't push.
-4. Close with thanks when they decline; confirm next step when they show interest.
-
-Latency: prefer fewer words over perfect grammar. Sound like a phone call, not a document.`;
+IMPORTANT: Keep each response under 40 words for low latency voice output.`;
 
 const END_SIGNALS = [
   'goodbye', 'bye', 'not interested', "i'll think about it", 'call me later',
@@ -66,28 +64,17 @@ export const conversationEngine = {
     let fullResponse = '';
     let buffer = '';
 
-    for await (const streamChunk of result.stream) {
-      const text = streamChunk.text();
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
       buffer += text;
       fullResponse += text;
 
-      while (true) {
-        // Prefer natural breaks; include Hindi danda for Hinglish.
-        const seps = ['. ', '? ', '! ', '\n', '। ', '।'];
-        let bestIdx = -1;
-        let bestLen = 0;
-        for (const sep of seps) {
-          const idx = buffer.lastIndexOf(sep);
-          if (idx > bestIdx) {
-            bestIdx = idx;
-            bestLen = sep.length;
-          }
-        }
-        if (bestIdx < 0) break;
-        const send = buffer.slice(0, bestIdx + bestLen).trim();
-        if (!send) break;
-        buffer = buffer.slice(bestIdx + bestLen).trimStart();
-        await onChunk(send);
+      // Send complete sentences to TTS immediately for minimal latency
+      const sentenceEnd = buffer.lastIndexOf('. ');
+      if (sentenceEnd > 0) {
+        const sentence = buffer.slice(0, sentenceEnd + 1).trim();
+        if (sentence) await onChunk(sentence);
+        buffer = buffer.slice(sentenceEnd + 2);
       }
     }
 

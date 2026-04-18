@@ -20,13 +20,16 @@ export async function initEslVoiceHooks(): Promise<void> {
 
     conn.events('json', 'CHANNEL_ANSWER CHANNEL_HANGUP_COMPLETE', () => {});
 
-    conn.on('esl::event::CHANNEL_ANSWER::*', (evt: { getHeader: (h: string) => string }) => {
-      const uuid = evt.getHeader('Unique-ID');
+    // modesl event payloads — use `any` (library has no stable types)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    conn.on('esl::event::CHANNEL_ANSWER::*', (evt: any) => {
+      const uuid = evt.getHeader?.('Unique-ID');
       if (uuid) freeswitchBridge.onChannelAnswer(uuid);
     });
 
-    conn.on('esl::event::CHANNEL_HANGUP_COMPLETE::*', (evt: { getHeader: (h: string) => string }) => {
-      const uuid = evt.getHeader('Unique-ID');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    conn.on('esl::event::CHANNEL_HANGUP_COMPLETE::*', (evt: any) => {
+      const uuid = evt.getHeader?.('Unique-ID');
       if (uuid) freeswitchBridge.onChannelHangupComplete(uuid);
     });
 

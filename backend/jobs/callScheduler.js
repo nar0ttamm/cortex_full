@@ -5,19 +5,21 @@
  *   - metadata.scheduled_call_at <= NOW()
  *   - metadata.call_initiated = false
  *
- * For each matching lead, triggers a call (simulated or live based on CALLING_MODE)
- * and marks call_initiated = true to prevent double-firing.
+ * For each matching lead, triggers a call:
+ * - If VOICE_SERVICE_URL is set → cortex_voice (same as CRM "Start AI call")
+ * - Else CALLING_MODE simulated → DB-only simulation, live → Exotel
  */
 
 const db = require('../db');
 const config = require('../config');
+const { requestVoiceStartCall } = require('../services/voiceOutbound');
 
 async function runCallScheduler() {
   const now = new Date().toISOString();
 
   // Query leads pending a call
   const result = await db.query(
-    `SELECT id, tenant_id, name, phone, metadata
+    `SELECT id, tenant_id, name, phone, inquiry, metadata
      FROM leads
      WHERE (metadata->>'call_initiated')::boolean = false
        AND metadata->>'scheduled_call_at' IS NOT NULL
@@ -51,16 +53,49 @@ async function runCallScheduler() {
 }
 
 async function processLeadCall(lead) {
-  const mode = (lead.metadata?.calling_mode || config.callingMode).trim();
-
   // Mark call_initiated immediately to prevent concurrent duplicate calls
   await markCallInitiated(lead.id, { call_status: 'initiating' });
 
+  if (config.voiceServiceUrl) {
+    await runVoiceVmCall(lead);
+    return;
+  }
+
+  const mode = (lead.metadata?.calling_mode || config.callingMode).trim();
   if (mode === 'simulated') {
     await runSimulatedCall(lead);
   } else {
     await runLiveCall(lead);
   }
+}
+
+async function runVoiceVmCall(lead) {
+  const result = await requestVoiceStartCall({
+    tenant_id: lead.tenant_id,
+    lead_id: lead.id,
+    phone: lead.phone,
+    name: lead.name,
+    inquiry: lead.inquiry,
+  });
+
+  const callId = result.call_id || result.call_sid || 'unknown';
+
+  const updatedMeta = {
+    ...(lead.metadata || {}),
+    call_sid: callId,
+    call_status: 'initiated',
+    call_initiated: true,
+    calling_mode: 'voice_vm',
+    last_call_at: new Date().toISOString(),
+    ai_call_status: 'In Progress',
+  };
+
+  await db.query('UPDATE leads SET metadata = $1, updated_at = NOW() WHERE id = $2', [
+    JSON.stringify(updatedMeta),
+    lead.id,
+  ]);
+
+  console.log(`[callScheduler] Voice VM call initiated for lead ${lead.id}, call_id=${callId}`);
 }
 
 async function runSimulatedCall(lead) {

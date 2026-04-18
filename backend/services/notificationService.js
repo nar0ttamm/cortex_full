@@ -1,5 +1,14 @@
 const db = require('../db');
+const config = require('../config');
 const { getCredentials } = require('./credentialService');
+
+/** Human-readable delay for WhatsApp/email copy (matches CALL_DELAY_SECONDS). */
+function scheduledCallDelayPhrase() {
+  const s = config.callDelaySeconds;
+  if (s <= 90) return '1 minute';
+  const m = Math.ceil(s / 60);
+  return m === 1 ? '1 minute' : `${m} minutes`;
+}
 
 /**
  * Send email via Resend API.
@@ -80,6 +89,7 @@ async function sendLeadEntryNotifications({ tenantId, lead, adminEmail, adminPho
   const leadPhone = lead.phone || '';
   const leadEmail = lead.email || null;
   const leadInquiry = lead.inquiry || 'No details provided';
+  const delayPhrase = scheduledCallDelayPhrase();
 
   const adminEmailHtml = `
     <h2>New Lead Received</h2>
@@ -88,21 +98,21 @@ async function sendLeadEntryNotifications({ tenantId, lead, adminEmail, adminPho
     <p><strong>Email:</strong> ${leadEmail || 'N/A'}</p>
     <p><strong>Inquiry:</strong> ${leadInquiry}</p>
     <p><strong>Source:</strong> ${lead.source || 'Unknown'}</p>
-    <p><em>AI call scheduled in 2 minutes.</em></p>
+    <p><em>AI call scheduled in ${delayPhrase}.</em></p>
   `;
 
   const leadEmailHtml = `
     <h2>Thank you for your interest!</h2>
     <p>Hi ${leadName},</p>
     <p>We have received your inquiry and our team will contact you shortly.</p>
-    <p>You will receive a call within the next few minutes.</p>
+    <p>You will receive a call within the next ${delayPhrase}.</p>
     <br/>
     <p>Best regards,<br/>CortexFlow Team</p>
   `;
 
-  const adminWaBody = `🔔 New Lead Alert!\nName: ${leadName}\nPhone: ${leadPhone}\nInquiry: ${leadInquiry}\nAI call scheduled in 2 minutes.`;
+  const adminWaBody = `🔔 New Lead Alert!\nName: ${leadName}\nPhone: ${leadPhone}\nInquiry: ${leadInquiry}\nAI call scheduled in ${delayPhrase}.`;
 
-  const leadWaBody = `Hi ${leadName}! 👋 Thank you for your interest. Our AI assistant will call you within the next 2 minutes to learn more about your requirements. Please keep your phone available.`;
+  const leadWaBody = `Hi ${leadName}! 👋 Thank you for your interest. Our AI assistant will call you within the next ${delayPhrase} to learn more about your requirements. Please keep your phone available.`;
 
   const tasks = [
     sendEmail({ tenantId, to: adminEmail, subject: `New Lead: ${leadName}`, html: adminEmailHtml }),

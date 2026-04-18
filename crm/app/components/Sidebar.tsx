@@ -5,7 +5,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useNotifications } from '../contexts/NotificationContext';
 import { createClient } from '@/lib/supabase/client';
-import { DEFAULT_TENANT_ID } from '@/lib/tenantConfig';
 
 const NAV = [
   {
@@ -123,7 +122,7 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
     await supabase.auth.signOut();
     router.push('/login');
   };
-  const tenantId = DEFAULT_TENANT_ID;
+  const tenantId = process.env.NEXT_PUBLIC_DEFAULT_TENANT_ID || 'b50750c7-0a91-4cd4-80fa-8921f974a8ec';
 
   useEffect(() => {
     fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/tenant/${tenantId}`)

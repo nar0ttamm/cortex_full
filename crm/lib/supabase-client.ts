@@ -37,6 +37,10 @@ async function fetchApi(path: string, options?: RequestInit) {
 // Flatten metadata fields to top-level so the Lead type (which predates metadata nesting) works correctly
 function flattenLead(lead: any): any {
   const m = lead?.metadata || {};
+  const callInit = m.call_initiated;
+  const callInitiated =
+    callInit === true || callInit === 'true' || String(callInit).toLowerCase() === 'true';
+
   return {
     ...lead,
     call_transcript: m.call_transcript ?? lead.call_transcript ?? null,
@@ -46,6 +50,9 @@ function flattenLead(lead: any): any {
     appointment_date: m.appointment_date ?? lead.appointment_date ?? null,
     reminder_1day_sent: m.reminder_1day_sent ?? lead.reminder_1day_sent ?? false,
     reminder_3hr_sent: m.reminder_3hr_sent ?? lead.reminder_3hr_sent ?? false,
+    scheduled_call_at: m.scheduled_call_at ?? null,
+    call_initiated: callInitiated,
+    active_call: m.active_call ?? null,
     timestamp: lead.created_at ?? lead.timestamp,
     last_update: lead.updated_at ?? lead.last_update,
   };

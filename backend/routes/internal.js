@@ -2,7 +2,7 @@
  * Internal routes triggered by Vercel Cron Jobs.
  * These endpoints run background jobs: call scheduling and appointment reminders.
  *
- * Vercel automatically adds Authorization: Bearer <CRON_SECRET> to cron requests.
+ * Vercel Cron uses GET; optional Authorization: Bearer <CRON_SECRET> when CRON_SECRET is set.
  * Set CRON_SECRET in Vercel dashboard. Locally, leave it unset to allow open access.
  */
 
@@ -23,18 +23,22 @@ function verifyCronSecret(req, res, next) {
   return next();
 }
 
-// POST /v1/internal/process-pending-calls
-// Vercel Cron: every minute  →  vercel.json cron schedule: "* * * * *"
-router.post('/internal/process-pending-calls', verifyCronSecret, asyncHandler(async (req, res) => {
+// Vercel Cron invokes GET (not POST). Both methods supported for manual triggers.
+const processPendingCalls = asyncHandler(async (req, res) => {
   const result = await runCallScheduler();
   return res.json({ status: 'ok', ...result });
-}));
-
-// POST /v1/internal/process-reminders
-// Vercel Cron: every hour  →  vercel.json cron schedule: "0 * * * *"
-router.post('/internal/process-reminders', verifyCronSecret, asyncHandler(async (req, res) => {
+});
+const processReminders = asyncHandler(async (req, res) => {
   const result = await runReminderJob();
   return res.json({ status: 'ok', ...result });
-}));
+});
+
+// GET/POST /v1/internal/process-pending-calls — Vercel Cron: * * * * *
+router.get('/internal/process-pending-calls', verifyCronSecret, processPendingCalls);
+router.post('/internal/process-pending-calls', verifyCronSecret, processPendingCalls);
+
+// GET/POST /v1/internal/process-reminders — Vercel Cron: 0 * * * *
+router.get('/internal/process-reminders', verifyCronSecret, processReminders);
+router.post('/internal/process-reminders', verifyCronSecret, processReminders);
 
 module.exports = router;

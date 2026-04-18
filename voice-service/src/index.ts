@@ -1,5 +1,5 @@
 import './bootstrap';
-import { createServer } from 'http';
+import http from 'http';
 import express from 'express';
 import { callController } from './callController';
 import { attachAudioIngressWss } from './audioIngressServer';
@@ -12,8 +12,6 @@ app.use(express.json());
 app.post('/voice/start-call', callController.startCall);
 app.post('/voice/end-call', callController.endCall);
 app.post('/voice/call-result', callController.callResult);
-app.post('/voice/audio-fork/start', callController.startAudioFork);
-app.post('/voice/audio-fork/stop', callController.stopAudioFork);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'cortex_voice', timestamp: new Date().toISOString() });
@@ -21,12 +19,11 @@ app.get('/health', (_req, res) => {
 
 const PORT = Number(process.env.PORT) || 5000;
 const HOST = process.env.LISTEN_HOST || '0.0.0.0';
-
-const server = createServer(app);
+const server = http.createServer(app);
 attachAudioIngressWss(server);
 
 server.listen(PORT, HOST, () => {
-  console.log(`cortex_voice listening on http://${HOST}:${PORT} (WebSocket audio ingress: /audio-in/:callId)`);
+  console.log(`cortex_voice listening on http://${HOST}:${PORT}`);
   void initEslVoiceHooks();
 });
 

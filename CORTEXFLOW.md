@@ -1,5 +1,5 @@
 # CortexFlow — AI Calling & CRM Platform
-> **Source of Truth** · Last updated: March 2026
+> **Source of Truth** · Last updated: March 11, 2026 · v2.1
 
 ---
 
@@ -54,28 +54,63 @@ CortexFlow is a multi-tenant SaaS CRM with AI-powered lead management. When a ne
 │              cortex-backend-api.vercel.app            │
 │                                                        │
 │  routes/   services/   jobs/   utils/   config/       │
-└──────────────────────────────────────────────────────┘
-           │
-           ▼
-┌──────────────────────┐
-│   Supabase Postgres  │
-│   (Database)         │
-│   Tables: tenants,   │
-│   leads, credentials │
-└──────────────────────┘
+│  integrations/  (webhook normalizer + manager)        │
+└─────────────────────────┬────────────────────────────┘
+           │              │
+           ▼              ▼
+┌──────────────────┐  ┌──────────────────────────────────┐
+│  Supabase Postgres│  │  cortex_voice (GCP VPS)           │
+│  Tables: tenants, │  │  voice.cortexflow.in:5000         │
+│  leads,           │  │                                   │
+│  credentials,     │  │  FreeSWITCH + SIP Trunk           │
+│  calls,           │  │  Deepgram STT (streaming)         │
+│  call_transcripts,│  │  Gemini 1.5 Flash (LLM)           │
+│  call_events,     │  │  Deepgram Aura TTS                │
+│  integrations,    │  │  VAD + conversation engine        │
+│  integration_logs │  └──────────────────────────────────┘
+└──────────────────┘
 ```
 
-**Lead processing pipeline (post-n8n, fully backend-orchestrated):**
+**AI Voice Calling pipeline (cortex_voice):**
 ```
-Lead Ingest → Notifications (Email+WhatsApp) → Schedule Call
-                                                    ↓
-                                          Cron (every 1 min)
-                                                    ↓
-                                          Exotel AI Call
-                                                    ↓
-                                    Webhook → Deepgram → Gemini
-                                                    ↓
-                                          Update Lead + Log
+Lead Ingest → POST /v1/calls/start → cortex_voice /voice/start-call
+                                           ↓
+                                  FreeSWITCH originates call
+                                           ↓
+                              RTP audio stream (8kHz PCMU)
+                                           ↓
+                         Deepgram STT streaming (nova-2, <300ms)
+                                           ↓
+                          VAD endpointing (300ms silence = final)
+                                           ↓
+                        Gemini 1.5 Flash (streaming, sentence chunks)
+                                           ↓
+                           Deepgram Aura TTS (audio chunks)
+                                           ↓
+                          Audio back to caller via FreeSWITCH
+                                           ↓
+                       Call end → transcript + summary saved
+                                           ↓
+                  POST /v1/calls/result → lead metadata updated
+```
+
+**Universal Lead Integration pipeline:**
+```
+External source (Meta/Google/IndiaMART/Zapier/Typeform/etc)
+    ↓
+POST /v1/webhook/:tenantId/:integrationKey
+    ↓
+HMAC secret verification
+    ↓
+leadNormalizer (maps any field names to internal schema)
+    ↓
+Idempotency check (phone dedup)
+    ↓
+Lead inserted → notifications + AI call scheduled
+    ↓
+integration_logs entry created
+    ↓
+Zapier-compatible response { id, status }
 ```
 
 ---
@@ -86,42 +121,51 @@ Lead Ingest → Notifications (Email+WhatsApp) → Schedule Call
 |---|---|
 | CRM Frontend | Next.js 15, React, TypeScript, Tailwind CSS v3 |
 | Landing Page | Next.js 15, React, TypeScript, Tailwind CSS |
-| Backend API | Node.js, Express.js |
+| Backend API | Node.js, Express.js (Vercel) |
+| Voice Service | Node.js, TypeScript (GCP VPS — `cortex_voice`) |
 | Database | Supabase PostgreSQL |
 | Auth | Supabase Auth (`@supabase/ssr`) |
-| AI Calling | Exotel (call initiation + TwiML) |
-| Transcription | Deepgram |
-| AI Analysis | Google Gemini |
+| Telephony | FreeSWITCH + SIP trunk (Telnyx/Twilio SIP) |
+| STT | Deepgram streaming (nova-2, `endpointing: 300ms`) |
+| AI LLM | Google Gemini 1.5 Flash (streaming) |
+| TTS | Deepgram Aura (streaming, ~$0.015/1K chars) |
+| Lead Integrations | Meta Lead Ads, Google, IndiaMART, Justdial, Zapier, Typeform, Tally |
 | Email | Resend |
 | WhatsApp | Twilio (sandbox → live after KYC) |
 | Cron (prod) | cron-job.org (external, Vercel Hobby limitation) |
 | Cron (dev) | node-cron (local) |
-| Deployment | Vercel (all 3 subprojects) |
-| Version Control | GitHub (4 repos) |
+| Deployment | Vercel (backend + CRM + landing) + GCP VM (voice service) |
+| Version Control | GitHub (nar0ttamm/cortex_backend, cortex_crm, cortex_landing) |
 
 ---
 
 ## 4. Repository Structure
 
 ```
-AI calling and CRM/          ← Root workspace (no repo)
+AI calling and CRM/          ← Root workspace
 ├── CORTEXFLOW.md            ← This file (source of truth)
 ├── backend/                 ← GitHub: cortex_backend
 │   ├── server.js            ← Express entry point
 │   ├── config/index.js      ← All env var access
 │   ├── routes/
 │   │   ├── leads.js         ← Lead CRUD + ingest + notes
-│   │   ├── calls.js         ← Exotel webhooks + TwiML
+│   │   ├── calls.js         ← Exotel webhooks + TwiML (legacy)
+│   │   ├── newCalls.js      ← AI voice engine: /v1/calls/start|result|:tenantId
+│   │   ├── integrations.js  ← Webhook ingestion + integration CRUD
 │   │   ├── appointments.js  ← Appointment scheduling
 │   │   ├── credentials.js   ← Credential retrieval
 │   │   ├── admin.js         ← Admin + tenant management
 │   │   ├── internal.js      ← Cron-triggered endpoints
 │   │   └── email.js         ← Resend inbound webhook
+│   ├── integrations/        ← Universal Lead Integration Engine
+│   │   ├── webhookHandler.js   ← HMAC verify + lead ingest pipeline
+│   │   ├── leadNormalizer.js   ← Universal field mapping (all platforms)
+│   │   └── integrationManager.js ← Create/list/delete/regenerate integrations
 │   ├── services/
 │   │   ├── leadService.js
 │   │   ├── notificationService.js
-│   │   ├── aiService.js     ← Deepgram + Gemini
-│   │   └── callService.js   ← Exotel + TwiML
+│   │   ├── aiService.js     ← Deepgram + Gemini (post-call analysis)
+│   │   └── callService.js   ← Exotel + TwiML (legacy)
 │   ├── jobs/
 │   │   ├── callScheduler.js ← Process pending calls
 │   │   ├── reminderJob.js   ← Appointment reminders
@@ -129,6 +173,20 @@ AI calling and CRM/          ← Root workspace (no repo)
 │   ├── db.js                ← pg Pool connection
 │   ├── encryption.js        ← AES credential encryption
 │   └── vercel.json
+│
+├── voice-service/           ← cortex_voice (deployed on GCP VPS)
+│   ├── src/
+│   │   ├── index.ts         ← Express entry point (port 5000)
+│   │   ├── callController.ts    ← POST /voice/start-call|end-call|call-result
+│   │   ├── freeswitchBridge.ts  ← FreeSWITCH ESL + conversation pipeline
+│   │   ├── speechRecognition.ts ← Deepgram streaming STT
+│   │   ├── conversationEngine.ts← Gemini 1.5 Flash streaming LLM
+│   │   ├── voiceSynthesis.ts    ← Deepgram Aura TTS (or Google TTS)
+│   │   └── callStorage.ts       ← DB writes for calls/transcripts/events
+│   ├── .env.example
+│   ├── DEPLOYMENT_GUIDE.md  ← Step-by-step GCP VPS + FreeSWITCH setup
+│   ├── package.json
+│   └── tsconfig.json
 │
 ├── crm/                     ← GitHub: cortex_crm
 │   ├── app/
@@ -139,11 +197,13 @@ AI calling and CRM/          ← Root workspace (no repo)
 │   │   ├── communications/  ← Per-lead comms log
 │   │   ├── appointments/    ← Calendar view
 │   │   ├── data/            ← Import/export/manual
+│   │   ├── integrations/    ← Connect lead sources, view webhook URLs
+│   │   │   └── page.tsx
 │   │   ├── tenant/          ← Business settings
 │   │   ├── login/ signup/   ← Auth pages
 │   │   ├── components/
 │   │   │   ├── AppShell.tsx      ← Main layout + dark mode
-│   │   │   ├── Sidebar.tsx       ← Collapsible nav + logout
+│   │   │   ├── Sidebar.tsx       ← Collapsible nav (+ Integrations item)
 │   │   │   └── NotificationToast.tsx
 │   │   ├── contexts/NotificationContext.tsx
 │   │   ├── hooks/useLeadNotifications.ts
@@ -208,6 +268,77 @@ AI calling and CRM/          ← Root workspace (no repo)
 - `communications_log` — Array of `{ type, direction, message, subject, status, timestamp }`
 - `notes` — Array of `{ id, text, author, timestamp }`
 
+### `calls`
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| tenant_id | UUID FK | → tenants.id |
+| lead_id | UUID FK | → leads.id |
+| phone | TEXT | Dialed number |
+| status | TEXT | initiating / active / completed / failed / ended |
+| outcome | TEXT | interested / not_interested / callback / appointment_booked / unknown |
+| duration_seconds | INTEGER | |
+| error_message | TEXT | If failed |
+| started_at | TIMESTAMPTZ | |
+| ended_at | TIMESTAMPTZ | |
+| created_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | |
+
+### `call_transcripts`
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| call_id | UUID FK | UNIQUE → calls.id |
+| full_transcript | TEXT | Full conversation transcript |
+| summary | TEXT | AI-generated summary |
+| created_at | TIMESTAMPTZ | |
+
+### `call_events`
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| call_id | UUID FK | → calls.id |
+| event_type | TEXT | call_completed / speech_start / etc |
+| event_data | JSONB | |
+| created_at | TIMESTAMPTZ | |
+
+### `integrations`
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| tenant_id | UUID FK | → tenants.id |
+| integration_key | TEXT | meta_lead_ads / zapier / generic / etc |
+| integration_type | TEXT | webhook / api_polling |
+| label | TEXT | Display name |
+| webhook_secret | TEXT | HMAC signing secret |
+| encrypted_credentials | TEXT | AES-256 encrypted |
+| status | TEXT | active / inactive |
+| created_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | |
+
+### `integration_logs`
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| tenant_id | UUID FK | → tenants.id |
+| integration_key | TEXT | |
+| status | TEXT | success / duplicate / rejected / error |
+| payload | JSONB | Raw incoming payload |
+| lead_id | UUID FK | → leads.id (if created) |
+| error_message | TEXT | |
+| created_at | TIMESTAMPTZ | |
+
+### `integration_sources`
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| key | TEXT UNIQUE | |
+| label | TEXT | |
+| integration_type | TEXT | |
+| description | TEXT | |
+| is_active | BOOLEAN | |
+| created_at | TIMESTAMPTZ | |
+
 ### `credentials`
 | Column | Type | Notes |
 |---|---|---|
@@ -221,6 +352,39 @@ AI calling and CRM/          ← Root workspace (no repo)
 ---
 
 ## 6. Backend API Endpoints
+
+### Voice Call Endpoints (NEW)
+| Method | Path | Description |
+|---|---|---|
+| POST | `/v1/calls/start` | Initiate AI call via cortex_voice service |
+| POST | `/v1/calls/result` | Receive call result from cortex_voice (voice-secret guarded) |
+| GET | `/v1/calls/:tenantId` | List calls for tenant |
+
+### Integration Endpoints (NEW)
+| Method | Path | Description |
+|---|---|---|
+| POST | `/v1/webhook/:tenantId/:integrationKey` | Receive lead from any external source |
+| GET | `/v1/webhook/:tenantId/:integrationKey` | Webhook verification (Meta challenge etc) |
+| GET | `/v1/integrations/supported` | List all supported integration types |
+| GET | `/v1/integrations/:tenantId` | List tenant's connected integrations |
+| GET | `/v1/integrations/:tenantId/:key` | Get single integration with webhook URL + secret |
+| POST | `/v1/integrations/:tenantId` | Connect a new integration |
+| POST | `/v1/integrations/:tenantId/:key/regenerate-secret` | Rotate webhook secret |
+| DELETE | `/v1/integrations/:tenantId/:key` | Disconnect integration |
+| GET | `/v1/integrations/:tenantId/logs` | View integration event logs |
+| POST | `/v1/integrations/:tenantId/:key/test` | Send test lead payload |
+
+### cortex_voice Internal API (GCP VPS — not public)
+| Method | Path | Description |
+|---|---|---|
+| POST | `/voice/start-call` | Initiate call (called by backend) |
+| POST | `/voice/end-call` | Hang up call |
+| POST | `/voice/call-result` | Notify completion (called internally) |
+| GET | `/health` | Service health check |
+
+---
+
+## 6b. Legacy API Endpoints
 
 **Base URL:** `https://cortex-backend-api.vercel.app`
 
@@ -298,6 +462,22 @@ ADMIN_EMAIL=                   # Email for new lead notifications
 ADMIN_PHONE=                   # WhatsApp number for admin alerts
 ADMIN_TOKEN=                   # Secret for /v1/admin/* routes
 CRON_SECRET=                   # Secret for /v1/internal/* routes
+VOICE_SERVICE_URL=             # https://voice.cortexflow.in (GCP VPS)
+VOICE_SECRET=                  # Shared secret between backend and voice service
+```
+
+### cortex_voice (`voice-service/.env` on GCP VPS)
+```env
+PORT=5000
+DATABASE_URL=                  # Same Supabase DB
+DEEPGRAM_API_KEY=              # Used for both STT and TTS
+GEMINI_API_KEY=
+TTS_PROVIDER=deepgram          # deepgram | google
+FREESWITCH_HOST=127.0.0.1
+FREESWITCH_ESL_PORT=8021
+FREESWITCH_ESL_PASSWORD=ClueCon
+VOICE_SECRET=                  # Must match backend's VOICE_SECRET
+BACKEND_URL=https://cortex-backend-api.vercel.app
 ```
 
 ### CRM (`crm/.env.local` / Vercel)
@@ -434,7 +614,7 @@ cd landing && npx vercel --prod --yes
 
 ## 11. Feature Milestones & Checklist
 
-### ✅ Completed
+### ✅ Completed (March 2026 — v2.0)
 - [x] Project structure — backend, CRM, landing (all on Vercel)
 - [x] Supabase database — tenants, leads, credentials tables
 - [x] Multi-tenant architecture with encrypted credential storage
@@ -467,41 +647,46 @@ cd landing && npx vercel --prod --yes
 - [x] Dashboard auto-retry on 500 errors
 - [x] All repos on GitHub (cortex_backend, cortex_crm, cortex_landing)
 
+### ✅ Completed (March 11, 2026 — v2.1)
+- [x] **AI Voice Calling Engine** — `cortex_voice` service (GCP VPS, TypeScript)
+  - `voice-service/` — standalone Node.js service, port 5000, deployed separately from Vercel
+  - FreeSWITCH ESL bridge (`freeswitchBridge.ts`) — outbound call origination via SIP trunk
+  - Deepgram streaming STT (`speechRecognition.ts`) — nova-2 model, 300ms VAD endpointing
+  - Gemini 1.5 Flash streaming LLM (`conversationEngine.ts`) — sentence-chunk streaming for <500ms latency
+  - Deepgram Aura TTS (`voiceSynthesis.ts`) — streaming audio, ~$0.015/1K chars
+  - Call storage (`callStorage.ts`) — writes to `calls`, `call_transcripts`, `call_events` tables
+  - Internal API: `POST /voice/start-call`, `POST /voice/end-call`, `POST /voice/call-result`
+  - Backend proxy: `POST /v1/calls/start`, `POST /v1/calls/result`, `GET /v1/calls/:tenantId`
+  - Cost: ~$0.02/call (STT + TTS + LLM + SIP combined)
+  - GCP deployment guide: `voice-service/DEPLOYMENT_GUIDE.md`
+- [x] **Universal Lead Integration Engine** — fully live in production
+  - Universal webhook endpoint: `POST /v1/webhook/:tenantId/:integrationKey`
+  - 8 platforms supported: Meta Lead Ads, Google Lead Forms, IndiaMART, Justdial, Zapier, Typeform, Tally, Generic
+  - HMAC SHA-256 + Bearer token webhook secret verification per integration
+  - `leadNormalizer.js` — maps 40+ field name variants from any platform to internal schema
+  - Idempotency via phone dedup, Zapier-compatible `{ id, status }` response
+  - Full integration CRUD: connect, disconnect, regenerate secret, test, event logs
+  - Supabase tables: `integrations`, `integration_logs`, `integration_sources` (seeded)
+- [x] **CRM Integrations Page** — `crm.cortexflow.in/integrations` (live)
+  - Integrated into AppShell — full sidebar, topbar, dark mode, CRM design system
+  - Stats bar: connected count, events today, leads created
+  - Connected tab: webhook URL copy, HMAC secret reveal/rotate, Test button, Disconnect
+  - Add Source tab: 8-platform grid with Connect/Connected state
+  - Event Logs tab: sortable table with status badges (success / duplicate / rejected)
+  - Sidebar nav item added (link icon)
+- [x] **Production deployments** — backend + CRM deployed via Vercel CLI (`npx vercel --prod --yes`)
+  - Backend commit: `nar0ttamm/cortex_backend` — `feat: add AI voice calling engine + universal lead integration engine`
+  - CRM commit: `nar0ttamm/cortex_crm` — `feat: add Integrations page + sidebar nav item`
+
 ### 🔄 In Progress / Next Up
-- [ ] **Exotel KYC** — Complete KYC to enable live calls (`CALLING_MODE=live`)
-- [ ] **Twilio WhatsApp** — Business verification for production (exit sandbox)
-- [ ] **8th feature (discussed)** — Multi-tenant onboarding / signup flow
+- [ ] **FreeSWITCH ESL audio wiring** — complete live RTP audio ↔ AI pipeline (needs GCP VPS + SIP creds)
+- [ ] **GCP VPS setup** — provision VM, install FreeSWITCH, register SIP trunk, deploy `cortex_voice`
+- [ ] **Backend env vars** — add `VOICE_SERVICE_URL` + `VOICE_SECRET` to Vercel backend project
+- [ ] **Exotel KYC** — enable live calls (`CALLING_MODE=live`) [legacy path]
+- [ ] **Twilio WhatsApp** — business verification for production (exit sandbox)
+- [ ] **Multi-tenant onboarding** — self-signup flow
 
 ### 📋 Future / Nice-to-Have
-#### 8. Universal Inbound Webhook & Zapier Integration
-> **Status: Planned — next major feature to build**
-
-Right now leads enter CortexFlow only via the landing page form, manual CRM entry, or CSV import. This feature exposes a single generic inbound webhook endpoint — `POST /v1/webhook/:tenantId` — so **any external tool can push leads directly into CortexFlow**, triggering the full AI calling + notification pipeline automatically.
-
-**Use cases this unlocks:**
-- **Typeform / Tally / JotForm** — embed a lead form anywhere; on submit it POSTs straight to CortexFlow
-- **IndiaMART / JustDial / Sulekha** — India's biggest B2B lead marketplaces send lead alerts via webhook; CortexFlow receives them directly
-- **Facebook & Instagram Lead Ads** — every ad lead gets an AI call within 2 minutes of form fill
-- **Zapier / Make (Integromat)** — connect 5,000+ apps (Google Sheets, LinkedIn, WhatsApp Business, HubSpot) in a no-code workflow
-- **Custom websites / apps** — any dev sends `POST { name, phone, email, inquiry, source }` and gets the full AI workflow
-- **WordPress, WooCommerce, Gravity Forms** — contact form submissions routed directly
-
-**What gets built:**
-1. `POST /v1/webhook/:tenantId` — accepts any JSON payload, normalizes common field name variants (`full_name`, `mobile`, `phone_number`, `message`, etc.), then calls the existing ingest pipeline
-2. A **webhook secret key per tenant** stored in the `credentials` table — only authorized sources can push leads
-3. A **Zapier-compatible 200 response** (`{ id, status }`) so Zaps can chain further actions
-4. **Tenant Settings UI panel** — shows the webhook URL + API key with a "Regenerate Key" button
-
-**Why it matters:** This turns CortexFlow from a standalone CRM into a **universal lead receiver**. No matter where the lead comes from — paid ads, directories, organic forms, partner portals — they all land in CortexFlow and get called by AI within 2 minutes. Zero manual copy-paste, zero missed leads.
-
-- [ ] `POST /v1/webhook/:tenantId` generic inbound endpoint
-- [ ] Webhook secret key per tenant
-- [ ] Field mapping / normalization layer
-- [ ] Zapier-compatible response format
-- [ ] Tenant Settings UI: webhook URL + key management
-
----
-
 - [ ] Lead import from Google Sheets
 - [ ] Custom AI call scripts per tenant
 - [ ] Lead scoring / AI priority ranking
@@ -554,6 +739,28 @@ curl -X POST https://cortex-backend-api.vercel.app/v1/admin/credentials \
   }'
 ```
 
+### Testing the Integrations System
+```bash
+# Connect Meta Lead Ads integration
+curl -X POST https://cortex-backend-api.vercel.app/v1/integrations/b50750c7-0a91-4cd4-80fa-8921f974a8ec \
+  -H "Content-Type: application/json" \
+  -d '{ "integration_key": "meta_lead_ads", "label": "Meta Lead Ads" }'
+
+# Send a test lead via webhook
+curl -X POST https://cortex-backend-api.vercel.app/v1/integrations/b50750c7-0a91-4cd4-80fa-8921f974a8ec/meta_lead_ads/test \
+  -H "Content-Type: application/json"
+
+# Send a real webhook payload (Zapier-style)
+curl -X POST "https://cortex-backend-api.vercel.app/v1/webhook/b50750c7-0a91-4cd4-80fa-8921f974a8ec/generic" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Jane Doe", "phone": "9123456789", "email": "jane@example.com", "message": "Interested in your product" }'
+
+# Start an AI call for a lead
+curl -X POST https://cortex-backend-api.vercel.app/v1/calls/start \
+  -H "Content-Type: application/json" \
+  -d '{ "tenant_id": "b50750c7-0a91-4cd4-80fa-8921f974a8ec", "lead_id": "YOUR_LEAD_ID" }'
+```
+
 ### Testing the Lead Flow
 ```bash
 # Inject a test lead
@@ -580,9 +787,10 @@ curl -X POST https://cortex-backend-api.vercel.app/v1/lead/ingest \
 
 ### Current Limitations
 - **Single tenant:** Hardcoded `DEFAULT_TENANT_ID` — no self-signup flow yet
-- **Simulated calls:** `CALLING_MODE=simulated` until Exotel KYC approved
+- **Simulated calls:** `CALLING_MODE=simulated` until Exotel KYC approved (legacy) or GCP VPS live (new path)
+- **cortex_voice:** ESL audio bridge skeleton complete; requires live GCP VM + SIP trunk to activate
 - **Twilio sandbox:** Leads must opt-in; production requires business verification
-- **No call recording storage:** Exotel recording URL is temporary; not persisted to S3
+- **No call recording storage:** Recording URL temporary; not persisted to S3
 - **No pagination:** Lead list loads all leads at once (fine up to ~1000 leads)
 
 ### Important Notes
