@@ -12,9 +12,9 @@
 | Stage | Name | Status | Owner / notes |
 |-------|------|--------|----------------|
 | 0 | Scope lock | **Done** (2026-04-14) — see Stage 0 charter | Confirm on standup if wider team ACK needed |
-| 1 | Real audio path | ☐ Not started · ☐ In progress · ☐ Done | |
-| 2 | CRM + lifecycle | ☐ Not started · ☐ In progress · ☐ Done | |
-| 3 | Conversation quality | ☐ Not started · ☐ In progress · ☐ Done | |
+| 1 | Real audio path | **In progress → largely working** (2026-04-18) — FreeSWITCH `mod_audio_fork` → Node WS → Deepgram STT → **OpenAI** (or Gemini) LLM → TTS → `uuid_broadcast`; metrics in `pm2 logs \| grep '\[metrics\]'` | Exit demo + limitation list still to formalize |
+| 2 | CRM + lifecycle | **In progress** — `/v1/calls/start` + **`/v1/calls/result`** idempotent; lead metadata (`call_result`, transcript, **`appointment_requested`**); CRM lead detail shows scheduling hint | Manual QA matrix per outcome still open |
+| 3 | Conversation quality | ☐ Not started · ☐ In progress · ☐ Done | Barge-in, endpointing, Hindi TTS path |
 | 4 | Hardening | ☐ Not started · ☐ In progress · ☐ Done | |
 | 5 | Pilot → iterate | ☐ Not started · ☐ In progress · ☐ Done | |
 
@@ -105,9 +105,9 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
 
 **Principles:**
 
-- [ ] Pick **exactly one** primary media path for v1 (do not parallelize two until one is green):
+- [x] Pick **exactly one** primary media path for v1 (do not parallelize two until one is green):
   - [ ] **Option A:** Carrier **media stream** (e.g. Telnyx WebSocket media) into `voice-service` (or sibling process).
-  - [ ] **Option B:** **FreeSWITCH** bridges RTP (or `mod_*`) to your process — document which module/approach.
+  - [x] **Option B:** **FreeSWITCH** — `mod_audio_fork` WebSocket to `cortex_voice` audio ingress (see `GCP_SESSION_GUIDE.md`, `callMediaPipeline.ts`).
 - [ ] All audio assumptions **telephony-realistic**: **8 kHz** narrowband unless you have proven wideband end-to-end.
 - [ ] **Instrumentation:** log timestamps for **first STT partial**, **first LLM token**, **first TTS byte** per turn (even if rough).
 
@@ -119,15 +119,15 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
 
 ### Checklist — pipeline (minimal viable)
 
-- [ ] **Streaming STT** integrated (WebSocket or vendor SDK); not “upload whole file after hangup” for v1 loop.
-- [ ] **LLM** receives transcript + system prompt; returns **streaming** or chunked text.
-- [ ] **Streaming TTS** (or chunked TTS) produces playable audio in the telephony format you inject.
-- [ ] **Session lifecycle:** call connect → pipeline start → call end → pipeline teardown (no zombie processes).
+- [x] **Streaming STT** integrated (Deepgram live; WebSocket).
+- [x] **LLM** receives history + system prompt; **streaming** + sentence chunking for TTS (OpenAI or Gemini).
+- [x] **Chunked TTS** (WAV to shared dir + `uuid_broadcast`) — telephony 8 kHz PCM path.
+- [x] **Session lifecycle:** ESL pipeline start/stop (`callMediaPipeline`); teardown on hangup.
 
 ### Checklist — observability
 
-- [ ] **call_id** (or equivalent) correlates logs across FS / carrier / Node for one call.
-- [ ] One **internal runbook** step: “how to place a test call and verify audio both ways.”
+- [x] **call_id** in pipeline, ESL, and `[metrics]` lines (voice service).
+- [ ] One **internal runbook** step: “how to place a test call and verify audio both ways.” (partially in `GCP_SESSION_GUIDE.md`)
 
 ### Stage 1 exit criteria
 
@@ -142,18 +142,18 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
 
 ### Checklist — start call
 
-- [ ] CRM (or API) can **start outbound** with `tenant` + `lead` + **voice service** returns `call_id` quickly (already partly true — verify against v1).
-- [ ] **Idempotency** understood: double-clicks / retries do not create inconsistent duplicate rows (align with backend rules).
+- [x] CRM / **`POST /v1/calls/start`** returns `call_id` quickly; voice dials async.
+- [x] **Idempotency** on **`/v1/calls/result`** (per `call_id` in `communications_log`).
 
 ### Checklist — during / end of call
 
-- [ ] **Answered vs not answered vs failed** reflected in CRM or `communications_log` (match your schema).
-- [ ] **`/v1/calls/result`** (or successor) handles: **completed**, **no_answer**, **dial_failed**, **technical_failure** — all paths you need for v1 ticked and tested.
-- [ ] **Disposition** or **summary** field (if v1 requires): spec’d and written on call end.
+- [x] **Outcome + transcript + summary** → lead metadata + `communications_log` entry.
+- [x] **`/v1/calls/result`** handles outcomes including dial failure from voice notify; extend as new hangup reasons appear.
+- [x] **Summary + structured `appointment_requested`** from LLM JSON → CRM metadata.
 
 ### Checklist — lead / pipeline
 
-- [ ] Lead status (or pipeline stage) updates from **outcome** where product requires it.
+- [x] Lead **status** updates from **interested** / **not_interested** / appointment-style outcomes (see `newCalls.js`).
 - [ ] **Manual QA script:** create lead → call → verify CRM row **once** per outcome type.
 
 ### Stage 2 exit criteria
@@ -257,7 +257,7 @@ _Use one line per session or deploy: date, stage touched, what was ticked, link 
 | Date | Stage | Summary |
 |------|-------|---------|
 | 2026-04-14 | 0 | Locked: outbound qualify (score) + callback/meeting; EN→HI/Hinglish; latency normal+tight; barge-in must; no recording; AMD in; no warm transfer; concurrency TBD; charter + “how % works” in doc. |
-| | | |
+| 2026-04-18 | 1–2 | OpenAI LLM on GCP VM (`LLM_PROVIDER=openai`); `/health` exposes `llm_provider` + `llm_model`; **`appointment_requested`** wired voice → backend → lead metadata → CRM lead detail hint; roadmap snapshot updated. |
 | | | |
 
 ---

@@ -350,6 +350,7 @@ export async function stopEslCallPipeline(callId: string, reason?: string): Prom
       summary: summary.text,
       duration_seconds: durationSeconds,
       outcome: summary.outcome,
+      appointment_requested: summary.appointment_requested,
     });
     await callStorage.logEvent(callId, 'pipeline_stopped', { reason: reason || 'unknown' });
   } catch (e: unknown) {
@@ -364,5 +365,6 @@ export async function stopEslCallPipeline(callId: string, reason?: string): Prom
     transcript: fullTranscript,
     summary: summary.text,
     duration_seconds: durationSeconds,
+    appointment_requested: summary.appointment_requested,
   });
 }

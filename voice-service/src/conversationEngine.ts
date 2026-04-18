@@ -51,6 +51,15 @@ export function hasLlmConfigured(): boolean {
   return Boolean(process.env.GEMINI_API_KEY?.trim());
 }
 
+/** Non-secret summary for logs and /health. */
+export function getLlmRuntimeSummary(): { provider: 'openai' | 'gemini'; model: string } {
+  const p = getEffectiveLlmProvider();
+  if (p === 'openai') {
+    return { provider: 'openai', model: (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim() };
+  }
+  return { provider: 'gemini', model: (process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim() };
+}
+
 /**
  * Gemini `startChat` history must start with role `user`, not `model`.
  * Our pipeline prepends the spoken greeting as `assistant` first — strip that prefix for the API.

@@ -5,6 +5,7 @@ import express from 'express';
 import { callController } from './callController';
 import { attachAudioIngressWss } from './audioIngressServer';
 import { initEslVoiceHooks } from './eslVoiceHooks';
+import { getLlmRuntimeSummary } from './conversationEngine';
 
 const app = express();
 app.use(express.json());
@@ -15,7 +16,14 @@ app.post('/voice/end-call', callController.endCall);
 app.post('/voice/call-result', callController.callResult);
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'cortex_voice', timestamp: new Date().toISOString() });
+  const llm = getLlmRuntimeSummary();
+  res.json({
+    status: 'ok',
+    service: 'cortex_voice',
+    timestamp: new Date().toISOString(),
+    llm_provider: llm.provider,
+    llm_model: llm.model,
+  });
 });
 
 const PORT = Number(process.env.PORT) || 5000;
@@ -24,7 +32,9 @@ const server = http.createServer(app);
 attachAudioIngressWss(server);
 
 server.listen(PORT, HOST, () => {
+  const llm = getLlmRuntimeSummary();
   console.log(`cortex_voice listening on http://${HOST}:${PORT}`);
+  console.log(`[cortex_voice] LLM: ${llm.provider} (${llm.model})`);
   const tts = process.env.VOICE_TTS_TMP_DIR?.trim();
   if (tts) {
     console.log(

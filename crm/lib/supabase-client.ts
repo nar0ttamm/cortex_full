@@ -45,6 +45,10 @@ function flattenLead(lead: any): any {
     ...lead,
     call_transcript: m.call_transcript ?? lead.call_transcript ?? null,
     call_result: m.call_result ?? lead.call_result ?? null,
+    appointment_requested:
+      m.appointment_requested === true || String(m.appointment_requested).toLowerCase() === 'true'
+        ? true
+        : undefined,
     ai_call_status: m.ai_call_status ?? lead.ai_call_status ?? null,
     appointment_status: m.appointment_status ?? lead.appointment_status ?? null,
     appointment_date: m.appointment_date ?? lead.appointment_date ?? null,

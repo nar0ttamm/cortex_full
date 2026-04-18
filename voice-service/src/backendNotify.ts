@@ -9,6 +9,7 @@ export async function notifyBackendCallResult(payload: {
   transcript?: string;
   summary?: string;
   duration_seconds?: number;
+  appointment_requested?: boolean;
 }): Promise<void> {
   const backendUrl = (process.env.BACKEND_URL || '').replace(/\/$/, '');
   if (!backendUrl) return;
@@ -21,6 +22,7 @@ export async function notifyBackendCallResult(payload: {
     transcript: payload.transcript ?? '',
     summary: payload.summary ?? '',
     duration_seconds: payload.duration_seconds ?? 0,
+    appointment_requested: payload.appointment_requested ?? false,
   };
 
   await fetch(`${backendUrl}/v1/calls/result`, {

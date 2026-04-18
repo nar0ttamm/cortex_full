@@ -88,7 +88,16 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
 // POST /v1/calls/result
 // Receives call result from cortex_voice service, updates lead (idempotent per call_id in communications_log)
 router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) => {
-  const { tenant_id, lead_id, call_id, transcript, summary, duration_seconds, outcome } = req.body;
+  const {
+    tenant_id,
+    lead_id,
+    call_id,
+    transcript,
+    summary,
+    duration_seconds,
+    outcome,
+    appointment_requested,
+  } = req.body;
   if (!tenant_id || !lead_id || !call_id) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
@@ -110,6 +119,7 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
     call_transcript: transcript || '',
     call_result: oc,
     last_call_at: new Date().toISOString(),
+    appointment_requested: Boolean(appointment_requested),
   };
 
   // Determine lead status update based on outcome
@@ -150,6 +160,7 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
     timestamp: new Date().toISOString(),
     duration_seconds: duration_seconds || 0,
     call_id,
+    appointment_requested: Boolean(appointment_requested),
   };
 
   await db.query(

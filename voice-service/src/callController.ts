@@ -71,6 +71,7 @@ export const callController = {
           summary: err.message || 'Originate failed',
           transcript: '',
           duration_seconds: 0,
+          appointment_requested: false,
         });
       });
   },
@@ -104,8 +105,10 @@ export const callController = {
   async callResult(req: Request, res: Response) {
     if (!requireVoiceSecret(req, res)) return;
 
-    const { call_id, transcript, summary, duration_seconds, outcome } = req.body;
+    const { call_id, transcript, summary, duration_seconds, outcome, appointment_requested } = req.body;
     if (!call_id) return res.status(400).json({ error: 'Missing call_id' });
+
+    const apptReq = Boolean(appointment_requested);
 
     try {
       await callStorage.saveCallResult({
@@ -114,6 +117,7 @@ export const callController = {
         summary: summary || '',
         duration_seconds: duration_seconds || 0,
         outcome: outcome || 'unknown',
+        appointment_requested: apptReq,
       });
 
       // Notify the main backend to update the lead
@@ -127,6 +131,7 @@ export const callController = {
           summary,
           duration_seconds,
           outcome: outcome || 'unknown',
+          appointment_requested: apptReq,
         });
       }
 

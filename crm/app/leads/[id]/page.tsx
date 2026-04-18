@@ -282,6 +282,11 @@ export default function LeadDetailPage() {
                   <div className="mt-3">
                     <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Call Result</p>
                     <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{lead.call_result}</p>
+                    {(lead.appointment_requested === true || lead.metadata?.appointment_requested === true) && (
+                      <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+                        Scheduling intent detected — follow up to confirm a slot.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

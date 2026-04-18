@@ -89,6 +89,7 @@ interface SaveResultParams {
   summary: string;
   duration_seconds: number;
   outcome: string;
+  appointment_requested?: boolean;
 }
 
 export const callStorage = {
@@ -120,7 +121,7 @@ export const callStorage = {
 
   async saveCallResult(params: SaveResultParams) {
     const pool = await getPool();
-    const { call_id, transcript, summary, duration_seconds, outcome } = params;
+    const { call_id, transcript, summary, duration_seconds, outcome, appointment_requested } = params;
 
     await pool.query(
       `UPDATE calls 
@@ -139,7 +140,14 @@ export const callStorage = {
     await pool.query(
       `INSERT INTO call_events (call_id, event_type, event_data, created_at)
        VALUES ($1, 'call_completed', $2, NOW())`,
-      [call_id, JSON.stringify({ outcome, duration_seconds })]
+      [
+        call_id,
+        JSON.stringify({
+          outcome,
+          duration_seconds,
+          appointment_requested: appointment_requested ?? false,
+        }),
+      ]
     );
   },
 

@@ -24,6 +24,8 @@ export interface Lead {
   calendar_event_id?: string;
   call_transcript?: string;
   call_result?: string;
+  /** Last AI call: prospect asked to book / schedule (from voice summary JSON). */
+  appointment_requested?: boolean;
   reminder_1day_sent?: boolean;
   reminder_3hr_sent?: boolean;
   last_update?: string;
