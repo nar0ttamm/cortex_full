@@ -206,13 +206,27 @@ sudo docker stop freeswitch
 sudo docker rm freeswitch
 ```
 
-3. **Run again** with a **file** mount (keep your previous flags: `--network host`, `ESL_PASSWORD`, etc.). Example — **merge** this `-v` line into your real `docker run`:
+3. **Run again** with mounts (keep your previous flags: `--network host`, `ESL_PASSWORD`, image name, etc.). The `-v` flags belong **only** on the `docker run` line — **not** typed alone in bash (that causes `-bash: -v: command not found`).
+
+If you are unsure what you used last time, list binds: `sudo docker inspect freeswitch --format '{{json .Mounts}}'`.
+
+Example — **merge** every `-v` and `-e` into **your** real `docker run` (add the **shared-tts** line so `uuid_broadcast` WAV files exist inside the container):
 
 ```bash
+sudo mkdir -p /opt/cortexflow/shared-tts
+
 sudo docker run -d --name freeswitch --restart unless-stopped --network host \
   -v /opt/freeswitch-config/telnyx.xml:/etc/freeswitch/sip_profiles/external/telnyx.xml:ro \
+  -v /opt/cortexflow/shared-tts:/opt/cortexflow/shared-tts \
   -e ESL_PASSWORD='YOUR_ESL_PASSWORD' \
   safarov/freeswitch
+```
+
+Verify the TTS folder is visible **inside** the container (must print `ok`):
+
+```bash
+echo ok | sudo tee /opt/cortexflow/shared-tts/ping.txt
+sudo docker exec freeswitch cat /opt/cortexflow/shared-tts/ping.txt
 ```
 
 4. Reload SIP (or restart the container once):
@@ -229,13 +243,24 @@ You should still see **REGED**.
 
 - Edit Telnyx credentials on the host: `sudo nano /opt/freeswitch-config/telnyx.xml`, then run the two `fs_cli` lines above (rescan + check gateway).
 
+**If `telnyx.xml` was accidentally created as a directory** (Sofia shows `Invalid Gateway`), remove it and recreate as a **file**: `sudo rm -rf /opt/freeswitch-config/telnyx.xml`. On the VM you can also run `voice-service/scripts/vm-apply-telnyx-gateway.sh` (uses `~/freeswitch-config/telnyx.xml` and `telnyx-sip.env`). Set **`-e ESL_PASSWORD=`** to the same value as **`FREESWITCH_ESL_PASSWORD`** in `voice-service/.env` (often `ClueCon`), not the literal string `YOUR_ESL_PASSWORD`.
+
+### TTS audio to the handset (`VOICE_TTS_TMP_DIR`)
+
+`cortex_voice` writes WAV files for `uuid_broadcast` on the **host**. FreeSWITCH opens that **same path** inside the container. Without a bind-mount, host files under `/tmp` or `/opt/cortexflow/shared-tts` are invisible to the container — calls can look healthy in logs but the callee hears **silence**.
+
+1. On the host: `sudo mkdir -p /opt/cortexflow/shared-tts` and set **`VOICE_TTS_TMP_DIR=/opt/cortexflow/shared-tts`** in the voice service `.env` (same path string the container will mount).
+2. Recreate the `freeswitch` container with **`-v /opt/cortexflow/shared-tts:/opt/cortexflow/shared-tts`** on the `docker run` line (see example above).
+3. Run the `ping.txt` check; then `npm run build` in your voice app directory and `pm2 restart cortex_voice --update-env`.
+
 ### `cortex_voice` env for backend-controlled calls
 
-In `/opt/cortex_voice/.env` ensure:
+In `/opt/cortex_voice/.env` (or `/opt/cortex_voice/voice-service/.env` if that is where PM2 runs from) ensure:
 
 - `USE_ESL_ORIGINATE=true`
 - `SIP_CALLER_ID_E164=+1YOUR_TELNYX_NUMBER` (E.164, same as working `originate` tests)
 - `SIP_GATEWAY_NAME=telnyx` (unless you renamed the gateway in XML)
 - `VOICE_SECRET` matches Vercel **cortex-backend-api** `VOICE_SECRET`
+- `VOICE_TTS_TMP_DIR=/opt/cortexflow/shared-tts` when FreeSWITCH is Docker and the directory is bind-mounted as above
 
-Then: `cd /opt/cortex_voice && npm run build && pm2 restart cortex_voice`
+Then from the directory that contains `package.json` for `cortex_voice` (often `voice-service`): `npm run build && pm2 restart cortex_voice --update-env`

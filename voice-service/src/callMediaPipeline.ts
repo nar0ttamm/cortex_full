@@ -45,6 +45,13 @@ interface Runtime {
 
 const pipelines = new Map<string, Runtime>();
 
+let ttsDirHintLogged = false;
+
+function getTtsOutputDir(): string {
+  const raw = process.env.VOICE_TTS_TMP_DIR?.trim();
+  return raw && raw.length > 0 ? raw : os.tmpdir();
+}
+
 /** After TTS + playback, ignore forked audio briefly so echo does not become a fake “user” turn. */
 const POST_TTS_GATE_MS = parseInt(process.env.VOICE_STT_POST_TTS_MS || '700', 10);
 /** Deepgram sometimes emits duplicate finals; ignore repeats within this window. */
@@ -60,9 +67,17 @@ function normalizeUtterance(s: string): string {
 
 async function writeTempWav(callId: string, seq: number, wav: Buffer): Promise<string> {
   const safe = callId.replace(/[^a-fA-F0-9-]/g, '');
-  const dir = os.tmpdir();
+  const dir = getTtsOutputDir();
+  await fs.mkdir(dir, { recursive: true });
   const fp = path.join(dir, `cortexflow-tts-${safe}-${seq}-${Date.now()}.wav`);
   await fs.writeFile(fp, wav);
+  if (!ttsDirHintLogged) {
+    ttsDirHintLogged = true;
+    const st = await fs.stat(fp);
+    console.log(
+      `[pipeline] TTS wav ${st.size} bytes -> ${fp}. FreeSWITCH must read this exact path; if FS runs in Docker, bind-mount this directory into the container at the same absolute path (see VOICE_TTS_TMP_DIR).`
+    );
+  }
   return fp;
 }
 
