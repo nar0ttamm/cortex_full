@@ -17,7 +17,8 @@ function requireVoiceSecret(req, res, next) {
 // POST /v1/calls/start
 // Schedules and initiates an outbound AI call via cortex_voice service
 router.post('/calls/start', asyncHandler(async (req, res) => {
-  const { tenant_id, lead_id } = req.body;
+  const tenant_id = typeof req.body.tenant_id === 'string' ? req.body.tenant_id.trim() : req.body.tenant_id;
+  const lead_id = typeof req.body.lead_id === 'string' ? req.body.lead_id.trim() : req.body.lead_id;
   if (!tenant_id || !lead_id) {
     return res.status(400).json({ error: 'Missing required fields: tenant_id, lead_id' });
   }
@@ -88,10 +89,11 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
 // POST /v1/calls/result
 // Receives call result from cortex_voice service, updates lead (idempotent per call_id in communications_log)
 router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) => {
+  const tenant_id =
+    typeof req.body.tenant_id === 'string' ? req.body.tenant_id.trim() : req.body.tenant_id;
+  const lead_id = typeof req.body.lead_id === 'string' ? req.body.lead_id.trim() : req.body.lead_id;
+  const call_id = typeof req.body.call_id === 'string' ? req.body.call_id.trim() : req.body.call_id;
   const {
-    tenant_id,
-    lead_id,
-    call_id,
     transcript,
     summary,
     duration_seconds,
@@ -180,8 +182,9 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
 // GET /v1/calls/:tenantId
 // List calls for a tenant (reads from calls table)
 router.get('/calls/:tenantId', asyncHandler(async (req, res) => {
-  const { tenantId } = req.params;
-  const { limit = 50, status, lead_id: leadId } = req.query;
+  const tenantId = String(req.params.tenantId || '').trim();
+  const { limit = 50, status, lead_id: leadIdRaw } = req.query;
+  const leadId = typeof leadIdRaw === 'string' ? leadIdRaw.trim() : leadIdRaw;
 
   let query = `
     SELECT c.*, l.name as lead_name, l.phone as lead_phone,
@@ -195,7 +198,7 @@ router.get('/calls/:tenantId', asyncHandler(async (req, res) => {
 
   if (status) {
     query += ` AND c.status = $${params.length + 1}`;
-    params.push(status);
+    params.push(typeof status === 'string' ? status.trim() : status);
   }
 
   if (leadId) {

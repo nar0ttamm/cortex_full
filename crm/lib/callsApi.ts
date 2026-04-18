@@ -28,7 +28,7 @@ export async function fetchCallsForTenant(
   if (opts?.status) q.set('status', opts.status);
   if (opts?.leadId) q.set('lead_id', opts.leadId);
 
-  const url = `${API_URL}/v1/calls/${tenantId}${q.toString() ? `?${q}` : ''}`;
+  const url = `${API_URL}/v1/calls/${encodeURIComponent(tenantId.trim())}${q.toString() ? `?${q}` : ''}`;
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -40,10 +40,13 @@ export async function fetchCallsForTenant(
 export async function startAiCall(tenantId: string, leadId: string): Promise<{ call_id: string }> {
   if (!API_URL) throw new Error('NEXT_PUBLIC_API_URL is not set');
 
+  const tid = tenantId.trim();
+  const lid = leadId.trim();
+
   const res = await fetch(`${API_URL}/v1/calls/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tenant_id: tenantId, lead_id: leadId }),
+    body: JSON.stringify({ tenant_id: tid, lead_id: lid }),
   });
 
   const data = await res.json().catch(() => ({}));
