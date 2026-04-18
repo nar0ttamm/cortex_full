@@ -35,7 +35,7 @@ Use the **Session pooler** URI (IPv4), not direct `db.*`. URL-encode special cha
 
 ### Image choice (STT vs trunk)
 
-- **`drachtio/drachtio-freeswitch-mrf`** includes **`mod_audio_fork`** (`uuid_audio_fork` for Deepgram). You must add an **`external`** SIP profile + Telnyx gateway XML under `sip_profiles` (see Telnyx docs); the stock MRF image only ships the **`drachtio_mrf`** profile.
+- **`drachtio/drachtio-freeswitch-mrf`** includes **`mod_audio_fork`** (`uuid_audio_fork` for Deepgram). The stock image only ships **`drachtio_mrf`**; add **`external.xml`** + **`external/telnyx.xml`** via bind mounts (see **`freeswitch/drachtio/external.xml`**, **`scripts/vm-switch-drachtio-freeswitch.sh`** on the VM after **`git pull`**). With **`--network host`**, set **`AUDIO_INGRESS_WS_BASE=ws://127.0.0.1:5000`**.
 - **`safarov/freeswitch`** has a normal **`external`** profile and Telnyx-style gateways, but typical builds **do not** ship **`mod_audio_fork`** — `uuid_audio_fork` will not work, so the realtime STT path cannot run on that image alone.
 
 ### Telnyx bind-mount gotcha
