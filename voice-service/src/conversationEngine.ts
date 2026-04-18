@@ -45,8 +45,9 @@ export const conversationEngine = {
     if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
 
     const genAI = new GoogleGenerativeAI(apiKey);
+    const modelId = (process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim();
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',  // fastest + cheapest Gemini model
+      model: modelId,
       systemInstruction: { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
     });
 
@@ -96,7 +97,8 @@ export const conversationEngine = {
     if (!apiKey) return { text: '', outcome: 'unknown', appointment_requested: false };
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const modelId = (process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim();
+    const model = genAI.getGenerativeModel({ model: modelId });
 
     const transcript = history.map(m => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content}`).join('\n');
 

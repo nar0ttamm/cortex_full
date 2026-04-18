@@ -12,7 +12,7 @@ Use the **Session pooler** URI (IPv4), not direct `db.*`. URL-encode special cha
 
 ## Google AI (Gemini)
 
-`GEMINI_API_KEY` — not OpenAI by default.
+`GEMINI_API_KEY` — not OpenAI by default. Set **`GEMINI_MODEL`** (e.g. `gemini-2.0-flash`). Unversioned ids like `gemini-1.5-flash` often return **404** from the current Generative Language API.
 
 ---
 
@@ -30,7 +30,17 @@ Use the **Session pooler** URI (IPv4), not direct `db.*`. URL-encode special cha
 
 ## Docker FreeSWITCH + Node
 
-If FreeSWITCH runs in Docker, set **`AUDIO_INGRESS_WS_BASE`** to the host reachable from the container (e.g. `ws://172.17.0.1:5000`), not `ws://127.0.0.1:5000`.
+- **Bridge networking:** set **`AUDIO_INGRESS_WS_BASE=ws://172.17.0.1:5000`** (Docker bridge gateway to the host where `cortex_voice` listens), not `ws://127.0.0.1:5000`.
+- **`--network host`:** use **`ws://127.0.0.1:5000`** (or omit and let defaults apply).
+
+### Image choice (STT vs trunk)
+
+- **`drachtio/drachtio-freeswitch-mrf`** includes **`mod_audio_fork`** (`uuid_audio_fork` for Deepgram). You must add an **`external`** SIP profile + Telnyx gateway XML under `sip_profiles` (see Telnyx docs); the stock MRF image only ships the **`drachtio_mrf`** profile.
+- **`safarov/freeswitch`** has a normal **`external`** profile and Telnyx-style gateways, but typical builds **do not** ship **`mod_audio_fork`** — `uuid_audio_fork` will not work, so the realtime STT path cannot run on that image alone.
+
+### Telnyx bind-mount gotcha
+
+The host path **`/opt/freeswitch-config/telnyx.xml` must be a file**, not a directory. If it is a directory, Docker mounts an empty tree, Sofia shows **Invalid Gateway**, and outbound SIP breaks.
 
 ---
 
