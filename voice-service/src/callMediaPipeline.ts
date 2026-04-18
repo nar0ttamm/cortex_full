@@ -113,6 +113,17 @@ async function speakText(callId: string, rt: Runtime, text: string, seqRef: { n:
   }
 }
 
+/** Short default greeting → faster first TTS. Override with VOICE_GREETING_TEMPLATE (use {name}). */
+function buildOutboundGreeting(ctx: PipelineCtx): string {
+  if (ctx.callScript?.trim()) return ctx.callScript.trim();
+  const tmpl = process.env.VOICE_GREETING_TEMPLATE?.trim();
+  const name = (ctx.name || 'there').trim() || 'there';
+  if (tmpl) {
+    return tmpl.replace(/\{name\}/g, name);
+  }
+  return `Hi ${name}, this is CortexFlow. Got a minute?`;
+}
+
 /**
  * After CHANNEL_ANSWER: fork audio → STT → LLM → TTS → uuid_broadcast.
  */
@@ -276,9 +287,7 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
   // Clear any placeholder media (e.g. silence_stream) so the first uuid_broadcast is clean.
   await uuidBreak(callId).catch(() => {});
 
-  const greeting =
-    ctx.callScript ||
-    `Namaste, main CortexFlow se call kar raha hoon — ${ctx.name} ji, abhi thoda time milega baat karne ka?`;
+  const greeting = buildOutboundGreeting(ctx);
 
   rt.conversationHistory.push({ role: 'assistant', content: greeting });
   const g0 = Date.now();
@@ -340,6 +349,7 @@ export async function stopEslCallPipeline(callId: string, reason?: string): Prom
           : 'No conversation captured (likely no answer or immediate hangup).',
       outcome: 'unknown',
       appointment_requested: false,
+      proposed_appointment_iso: null,
     };
   }
 
@@ -351,6 +361,7 @@ export async function stopEslCallPipeline(callId: string, reason?: string): Prom
       duration_seconds: durationSeconds,
       outcome: summary.outcome,
       appointment_requested: summary.appointment_requested,
+      proposed_appointment_iso: summary.proposed_appointment_iso ?? null,
     });
     await callStorage.logEvent(callId, 'pipeline_stopped', { reason: reason || 'unknown' });
   } catch (e: unknown) {
@@ -366,5 +377,6 @@ export async function stopEslCallPipeline(callId: string, reason?: string): Prom
     summary: summary.text,
     duration_seconds: durationSeconds,
     appointment_requested: summary.appointment_requested,
+    proposed_appointment_iso: summary.proposed_appointment_iso ?? null,
   });
 }

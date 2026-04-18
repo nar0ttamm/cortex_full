@@ -90,6 +90,7 @@ interface SaveResultParams {
   duration_seconds: number;
   outcome: string;
   appointment_requested?: boolean;
+  proposed_appointment_iso?: string | null;
 }
 
 export const callStorage = {
@@ -121,7 +122,8 @@ export const callStorage = {
 
   async saveCallResult(params: SaveResultParams) {
     const pool = await getPool();
-    const { call_id, transcript, summary, duration_seconds, outcome, appointment_requested } = params;
+    const { call_id, transcript, summary, duration_seconds, outcome, appointment_requested, proposed_appointment_iso } =
+      params;
 
     await pool.query(
       `UPDATE calls 
@@ -146,6 +148,7 @@ export const callStorage = {
           outcome,
           duration_seconds,
           appointment_requested: appointment_requested ?? false,
+          proposed_appointment_iso: proposed_appointment_iso ?? null,
         }),
       ]
     );

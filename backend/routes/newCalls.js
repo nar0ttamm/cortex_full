@@ -2,6 +2,7 @@ const { Router } = require('express');
 const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const config = require('../config');
+const { applyVoiceScheduledAppointment } = require('../services/appointmentFromCall');
 
 const router = Router();
 
@@ -99,6 +100,7 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
     duration_seconds,
     outcome,
     appointment_requested,
+    proposed_appointment_iso,
   } = req.body;
   if (!tenant_id || !lead_id || !call_id) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -176,7 +178,23 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
     [JSON.stringify([commEntry]), lead_id]
   );
 
-  return res.json({ status: 'updated', lead_id, call_id });
+  let calendar = { applied: false };
+  try {
+    calendar = await applyVoiceScheduledAppointment({
+      tenant_id,
+      lead_id,
+      proposed_appointment_iso:
+        typeof proposed_appointment_iso === 'string' ? proposed_appointment_iso.trim() : proposed_appointment_iso,
+      summary: summary || transcript || '',
+    });
+    if (calendar.applied) {
+      console.log('[calls/result] CRM calendar scheduled from voice', lead_id, calendar.appointment_date);
+    }
+  } catch (e) {
+    console.error('[calls/result] calendar from voice failed', e.message);
+  }
+
+  return res.json({ status: 'updated', lead_id, call_id, calendar });
 }));
 
 // GET /v1/calls/:tenantId

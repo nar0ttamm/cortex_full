@@ -205,6 +205,7 @@ class FreeswitchBridge extends EventEmitter {
       duration_seconds: durationSeconds,
       outcome: summary.outcome,
       appointment_requested: summary.appointment_requested,
+      proposed_appointment_iso: summary.proposed_appointment_iso ?? null,
     });
 
     await this.hangupCall(callId);
@@ -223,6 +224,7 @@ class FreeswitchBridge extends EventEmitter {
           duration_seconds: durationSeconds,
           outcome: summary.outcome,
           appointment_requested: summary.appointment_requested,
+          proposed_appointment_iso: summary.proposed_appointment_iso ?? null,
         }),
       });
     } catch (_) {}

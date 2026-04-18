@@ -14,6 +14,8 @@ interface CallSummary {
   text: string;
   outcome: 'interested' | 'not_interested' | 'callback' | 'appointment_booked' | 'unknown';
   appointment_requested: boolean;
+  /** ISO 8601 with offset when caller agreed a concrete slot (e.g. Asia/Kolkata +05:30). */
+  proposed_appointment_iso?: string | null;
 }
 
 const SYSTEM_PROMPT = `You are a friendly and professional AI sales assistant for a business using CortexFlow CRM.
@@ -22,14 +24,15 @@ Your role is to:
 2. Briefly explain how the business can help them
 3. Ask qualifying questions about their needs
 4. If interested, offer to schedule an appointment or callback
-5. Keep responses SHORT — 1-3 sentences max per turn, like a real phone conversation
+5. Keep responses SHORT — 1-2 sentences max per turn, like a real phone conversation
 6. Be natural, empathetic, and never robotic
 7. Detect when the conversation is naturally ending and wrap up politely
 
-When the prospect wants to schedule: confirm their preferred time and mention they'll receive a confirmation.
+When the prospect wants to schedule: confirm date AND time in plain words (e.g. "tomorrow twelve noon IST"), then say they'll see it on the CRM calendar.
+Default to Indian English / Hinglish if they mix languages.
 When not interested: thank them politely and end the call graciously.
 
-IMPORTANT: Keep each response under 40 words for low latency voice output.`;
+IMPORTANT: Keep each response under 35 words for low latency voice output. No markdown or bullet lists—spoken words only.`;
 
 const END_SIGNALS = [
   'goodbye', 'bye', 'not interested', "i'll think about it", 'call me later',
@@ -216,8 +219,14 @@ export const conversationEngine = {
 {
   "summary": "2-3 sentence summary of the call",
   "outcome": "interested|not_interested|callback|appointment_booked|unknown",
-  "appointment_requested": true|false
+  "appointment_requested": true|false,
+  "proposed_appointment_iso": null
 }
+
+Rules for proposed_appointment_iso:
+- If the customer clearly agreed to a specific date AND clock time, set this to ISO 8601 with timezone offset (use Asia/Kolkata IST +05:30 for Indian prospects unless the transcript states another zone). Example: "2026-04-20T12:00:00+05:30" for 12:00 noon local.
+- If they only said "tomorrow" without a time, or "next week", or no concrete slot, use null.
+- Never invent a time that was not discussed.
 
 Transcript:
 ${transcript}`;
@@ -226,7 +235,7 @@ ${transcript}`;
 
     if (provider === 'openai') {
       const apiKey = process.env.OPENAI_API_KEY;
-      if (!apiKey) return { text: '', outcome: 'unknown', appointment_requested: false };
+      if (!apiKey) return { text: '', outcome: 'unknown', appointment_requested: false, proposed_appointment_iso: null };
       try {
         const model = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
         const client = new OpenAI({ apiKey });
@@ -238,20 +247,25 @@ ${transcript}`;
         const text = res.choices[0]?.message?.content?.trim() ?? '';
         if (text) {
           const parsed = JSON.parse(text);
+          const iso =
+            typeof parsed.proposed_appointment_iso === 'string' && parsed.proposed_appointment_iso.trim()
+              ? parsed.proposed_appointment_iso.trim()
+              : null;
           return {
             text: parsed.summary || '',
             outcome: parsed.outcome || 'unknown',
             appointment_requested: Boolean(parsed.appointment_requested),
+            proposed_appointment_iso: iso,
           };
         }
       } catch (err: any) {
         console.error('[conversationEngine.summarize]', err.message);
       }
-      return { text: '', outcome: 'unknown', appointment_requested: false };
+      return { text: '', outcome: 'unknown', appointment_requested: false, proposed_appointment_iso: null };
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return { text: '', outcome: 'unknown', appointment_requested: false };
+    if (!apiKey) return { text: '', outcome: 'unknown', appointment_requested: false, proposed_appointment_iso: null };
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const modelId = (process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim();
@@ -263,16 +277,21 @@ ${transcript}`;
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
+        const iso =
+          typeof parsed.proposed_appointment_iso === 'string' && parsed.proposed_appointment_iso.trim()
+            ? parsed.proposed_appointment_iso.trim()
+            : null;
         return {
           text: parsed.summary || '',
           outcome: parsed.outcome || 'unknown',
           appointment_requested: parsed.appointment_requested || false,
+          proposed_appointment_iso: iso,
         };
       }
     } catch (err: any) {
       console.error('[conversationEngine.summarize]', err.message);
     }
 
-    return { text: '', outcome: 'unknown', appointment_requested: false };
+    return { text: '', outcome: 'unknown', appointment_requested: false, proposed_appointment_iso: null };
   },
 };

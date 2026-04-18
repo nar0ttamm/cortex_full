@@ -13,7 +13,7 @@
 |-------|------|--------|----------------|
 | 0 | Scope lock | **Done** (2026-04-14) — see Stage 0 charter | Confirm on standup if wider team ACK needed |
 | 1 | Real audio path | **In progress → largely working** (2026-04-18) — FreeSWITCH `mod_audio_fork` → Node WS → Deepgram STT → **OpenAI** (or Gemini) LLM → TTS → `uuid_broadcast`; metrics in `pm2 logs \| grep '\[metrics\]'` | Exit demo + limitation list still to formalize |
-| 2 | CRM + lifecycle | **In progress** — `/v1/calls/start` + **`/v1/calls/result`** idempotent; lead metadata (`call_result`, transcript, **`appointment_requested`**); CRM lead detail shows scheduling hint | Manual QA matrix per outcome still open |
+| 2 | CRM + lifecycle | **In progress** — same + **post-call slot → CRM calendar** when LLM returns **`proposed_appointment_iso`** (`appointmentFromCall` → lead `metadata` like `/appointments`) | Manual QA matrix per outcome still open |
 | 3 | Conversation quality | ☐ Not started · ☐ In progress · ☐ Done | Barge-in, endpointing, Hindi TTS path |
 | 4 | Hardening | ☐ Not started · ☐ In progress · ☐ Done | |
 | 5 | Pilot → iterate | ☐ Not started · ☐ In progress · ☐ Done | |
@@ -150,6 +150,7 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
 - [x] **Outcome + transcript + summary** → lead metadata + `communications_log` entry.
 - [x] **`/v1/calls/result`** handles outcomes including dial failure from voice notify; extend as new hangup reasons appear.
 - [x] **Summary + structured `appointment_requested`** from LLM JSON → CRM metadata.
+- [x] **Agreed slot** — `proposed_appointment_iso` (IST) from post-call JSON → **`applyVoiceScheduledAppointment`** → lead **`appointment_date` / `appointment_status: Scheduled`** (same as manual `/v1/appointment/schedule`; shows on CRM **Appointments**).
 
 ### Checklist — lead / pipeline
 
@@ -169,7 +170,7 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
 
 ### Checklist — prompts & flow
 
-- [ ] System prompt enforces **short**, **spoken** sentences (no markdown, no bullet lists spoken aloud).
+- [x] System prompt enforces **short**, **spoken** sentences (no markdown); scheduling copy points to CRM calendar.
 - [ ] **Opening greeting:** either generated or **cached audio** played immediately on answer to mask connect latency.
 - [ ] **Silence / thinking** behavior: one scripted line (“Take your time”) if waiting for user — only if product wants it.
 
@@ -258,6 +259,7 @@ _Use one line per session or deploy: date, stage touched, what was ticked, link 
 |------|-------|---------|
 | 2026-04-14 | 0 | Locked: outbound qualify (score) + callback/meeting; EN→HI/Hinglish; latency normal+tight; barge-in must; no recording; AMD in; no warm transfer; concurrency TBD; charter + “how % works” in doc. |
 | 2026-04-18 | 1–2 | OpenAI LLM on GCP VM (`LLM_PROVIDER=openai`); `/health` exposes `llm_provider` + `llm_model`; **`appointment_requested`** wired voice → backend → lead metadata → CRM lead detail hint; roadmap snapshot updated. |
+| 2026-04-19 | 2–3 | Post-call JSON **`proposed_appointment_iso`** → backend **`applyVoiceScheduledAppointment`** (CRM calendar fields); shorter default greeting + tunable **Deepgram endpointing**; prompt tuned for IST slot extraction. |
 | | | |
 
 ---

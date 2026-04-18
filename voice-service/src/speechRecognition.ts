@@ -27,6 +27,7 @@ export const speechRecognition = {
 
     // Must match mod_audio_fork rate (`AUDIO_FORK_MIX`, default `mono 16k` → 16000). Sending 16k PCM with sample_rate 8000 breaks STT.
     const sampleRate = parseInt(process.env.DEEPGRAM_SAMPLE_RATE || '16000', 10);
+    const endpointing = Math.max(100, parseInt(process.env.DEEPGRAM_ENDPOINTING_MS || '280', 10));
 
     const live = deepgram.listen.live({
       model: process.env.DEEPGRAM_MODEL || 'nova-2',
@@ -36,8 +37,8 @@ export const speechRecognition = {
       channels: 1,
       punctuate: true,
       interim_results: true,
-      endpointing: 300,            // VAD: send final transcript after 300ms silence
-      utterance_end_ms: 1000,      // Treat as speech end after 1s of silence
+      endpointing, // ms silence before final (lower = snappier, risk of cutting mid-thought)
+      utterance_end_ms: Math.max(500, parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS || '1000', 10)),
       vad_events: true,
     });
 

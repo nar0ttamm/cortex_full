@@ -105,10 +105,15 @@ export const callController = {
   async callResult(req: Request, res: Response) {
     if (!requireVoiceSecret(req, res)) return;
 
-    const { call_id, transcript, summary, duration_seconds, outcome, appointment_requested } = req.body;
+    const { call_id, transcript, summary, duration_seconds, outcome, appointment_requested, proposed_appointment_iso } =
+      req.body;
     if (!call_id) return res.status(400).json({ error: 'Missing call_id' });
 
     const apptReq = Boolean(appointment_requested);
+    const iso =
+      typeof proposed_appointment_iso === 'string' && proposed_appointment_iso.trim()
+        ? proposed_appointment_iso.trim()
+        : null;
 
     try {
       await callStorage.saveCallResult({
@@ -118,6 +123,7 @@ export const callController = {
         duration_seconds: duration_seconds || 0,
         outcome: outcome || 'unknown',
         appointment_requested: apptReq,
+        proposed_appointment_iso: iso,
       });
 
       // Notify the main backend to update the lead
@@ -132,6 +138,7 @@ export const callController = {
           duration_seconds,
           outcome: outcome || 'unknown',
           appointment_requested: apptReq,
+          proposed_appointment_iso: iso,
         });
       }
 
