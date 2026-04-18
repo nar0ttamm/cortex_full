@@ -43,7 +43,10 @@ function getEffectiveLlmProvider(): 'openai' | 'gemini' {
   const explicit = (process.env.LLM_PROVIDER || '').trim().toLowerCase();
   if (explicit === 'openai') return 'openai';
   if (explicit === 'gemini') return 'gemini';
-  if (process.env.OPENAI_API_KEY?.trim() && !process.env.GEMINI_API_KEY?.trim()) return 'openai';
+  // When both keys exist, default used to be Gemini → post-call summarize hit 429 and CRM never got slots.
+  // Prefer OpenAI whenever its key is set (streaming + summarize stay aligned).
+  if (process.env.OPENAI_API_KEY?.trim()) return 'openai';
+  if (process.env.GEMINI_API_KEY?.trim()) return 'gemini';
   return 'gemini';
 }
 
@@ -251,12 +254,16 @@ ${transcript}`;
             typeof parsed.proposed_appointment_iso === 'string' && parsed.proposed_appointment_iso.trim()
               ? parsed.proposed_appointment_iso.trim()
               : null;
-          return {
+          const out = {
             text: parsed.summary || '',
             outcome: parsed.outcome || 'unknown',
             appointment_requested: Boolean(parsed.appointment_requested),
             proposed_appointment_iso: iso,
           };
+          console.log(
+            `[conversationEngine.summarize] openai ok outcome=${out.outcome} appointment_requested=${out.appointment_requested} proposed_iso=${iso ? 'yes' : 'no'}`
+          );
+          return out;
         }
       } catch (err: any) {
         console.error('[conversationEngine.summarize]', err.message);

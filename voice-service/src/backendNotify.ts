@@ -27,14 +27,24 @@ export async function notifyBackendCallResult(payload: {
     proposed_appointment_iso: payload.proposed_appointment_iso ?? null,
   };
 
-  await fetch(`${backendUrl}/v1/calls/result`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-voice-secret': process.env.VOICE_SECRET || '',
-    },
-    body: JSON.stringify(body),
-  }).catch((e: Error) => console.error('[backendNotify]', e.message));
+  try {
+    const res = await fetch(`${backendUrl}/v1/calls/result`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-voice-secret': process.env.VOICE_SECRET || '',
+      },
+      body: JSON.stringify(body),
+    });
+    const snippet = (await res.text()).slice(0, 400);
+    if (!res.ok) {
+      console.error(`[backendNotify] calls/result HTTP ${res.status}`, snippet);
+      return;
+    }
+    console.log(`[backendNotify] calls/result ok call_id=${payload.call_id}`, snippet.slice(0, 180));
+  } catch (e: unknown) {
+    console.error('[backendNotify]', e instanceof Error ? e.message : e);
+  }
 }
 
 /** Mid-call phase (e.g. answered). Extend backend with a dedicated route when CRM live status is needed. */
