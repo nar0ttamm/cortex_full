@@ -36,6 +36,16 @@ const END_SIGNALS = [
   'no thank you', 'not now', 'have a good day', 'talk to you later',
 ];
 
+/**
+ * Gemini `startChat` history must start with role `user`, not `model`.
+ * Our pipeline prepends the spoken greeting as `assistant` first — strip that prefix for the API.
+ */
+function trimHistoryForGeminiChat(history: Message[]): Message[] {
+  let i = 0;
+  while (i < history.length && history[i].role === 'assistant') i += 1;
+  return history.slice(i);
+}
+
 export const conversationEngine = {
   async streamResponse(
     history: Message[],
@@ -51,14 +61,21 @@ export const conversationEngine = {
       systemInstruction: { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
     });
 
-    // Convert history to Gemini format
-    const geminiHistory = history.slice(0, -1).map(msg => ({
+    const trimmed = trimHistoryForGeminiChat(history);
+    if (trimmed.length === 0) {
+      throw new Error('No messages after trimming assistant-only prefix');
+    }
+    const lastMessage = trimmed[trimmed.length - 1];
+    if (lastMessage.role !== 'user') {
+      throw new Error('Expected last message to be user turn');
+    }
+
+    const geminiHistory = trimmed.slice(0, -1).map(msg => ({
       role: msg.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: msg.content }],
     }));
 
     const chat = model.startChat({ history: geminiHistory });
-    const lastMessage = history[history.length - 1];
 
     const result = await chat.sendMessageStream(lastMessage.content);
 
