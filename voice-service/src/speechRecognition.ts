@@ -25,11 +25,14 @@ export const speechRecognition = {
 
     const deepgram = createClient(apiKey);
 
+    // Must match mod_audio_fork rate (`AUDIO_FORK_MIX`, default `mono 16k` → 16000). Sending 16k PCM with sample_rate 8000 breaks STT.
+    const sampleRate = parseInt(process.env.DEEPGRAM_SAMPLE_RATE || '16000', 10);
+
     const live = deepgram.listen.live({
-      model: 'nova-2',
-      language: 'en-IN',           // Indian English — change as needed
+      model: process.env.DEEPGRAM_MODEL || 'nova-2',
+      language: process.env.DEEPGRAM_LANGUAGE || 'en-IN',
       encoding: 'linear16',
-      sample_rate: 8000,           // Standard telephony (PCMU/G711)
+      sample_rate: sampleRate,
       channels: 1,
       punctuate: true,
       interim_results: true,
@@ -39,7 +42,7 @@ export const speechRecognition = {
     });
 
     live.on(LiveTranscriptionEvents.Open, () => {
-      console.log('[Deepgram] Streaming session opened');
+      console.log(`[Deepgram] Streaming session opened (sample_rate=${sampleRate} Hz; must match mod_audio_fork / AUDIO_FORK_MIX)`);
     });
 
     live.on(LiveTranscriptionEvents.Transcript, (data) => {
