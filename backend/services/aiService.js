@@ -30,13 +30,28 @@ async function transcribeCall({ tenantId, recordingUrl }) {
 }
 
 /**
- * Analyze a call transcript using Gemini to extract lead intent.
- * Credentials shape: { api_key }
+ * Analyze a call transcript with OpenAI to extract lead intent.
+ * Credentials: tenant row `service=openai` → `{ api_key, model? }`, else `OPENAI_API_KEY` on the server.
  *
  * Returns: { interested, confirmed_appointment, needs_info, callback_time, appointment_date, next_action }
  */
 async function analyzeTranscript({ tenantId, transcript, lead }) {
-  const creds = await getCredentials(tenantId, 'gemini');
+  const config = require('../config');
+  let apiKey;
+  let model = config.openAiModel || 'gpt-4o-mini';
+
+  try {
+    const creds = await getCredentials(tenantId, 'openai');
+    apiKey = creds.api_key;
+    if (creds.model) model = creds.model;
+  } catch {
+    apiKey = config.openAiApiKey;
+    if (!apiKey) {
+      throw new Error(
+        'OpenAI not configured: add credentials service=openai for this tenant or set OPENAI_API_KEY on the backend'
+      );
+    }
+  }
 
   const prompt = `You are a professional sales assistant analyzing a call transcript.
 
@@ -53,37 +68,43 @@ Based on this conversation, analyze and respond ONLY in this exact JSON format (
 
 next_action options: "send_info", "schedule_callback", "confirm_appointment", "follow_up", "no_action"`;
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${creds.api_key}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
-      }),
-    }
-  );
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      max_tokens: 400,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: 'You reply only with a single JSON object matching the user instructions.' },
+        { role: 'user', content: prompt },
+      ],
+    }),
+  });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(`Gemini error: ${err.error?.message || res.statusText}`);
+    const msg = err.error?.message || res.statusText;
+    throw new Error(`OpenAI error: ${msg}`);
   }
 
   const data = await res.json();
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const rawText = data?.choices?.[0]?.message?.content?.trim() || '';
 
-  // Gemini sometimes wraps JSON in markdown code fences
   const jsonMatch = rawText.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    console.warn('[aiService] Gemini returned non-JSON:', rawText);
+    console.warn('[aiService] OpenAI returned non-JSON:', rawText);
     return fallbackAnalysis(rawText);
   }
 
   try {
     return JSON.parse(jsonMatch[0]);
   } catch {
-    console.warn('[aiService] Gemini JSON parse failed:', jsonMatch[0]);
+    console.warn('[aiService] OpenAI JSON parse failed:', jsonMatch[0]);
     return fallbackAnalysis(rawText);
   }
 }

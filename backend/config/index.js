@@ -36,4 +36,8 @@ module.exports = {
   // cortex_voice service
   voiceServiceUrl: e(process.env.VOICE_SERVICE_URL) || null,
   voiceSecret: e(process.env.VOICE_SECRET) || null,
+
+  // OpenAI — post-call transcript analysis (fallback when tenant has no `openai` credentials row)
+  openAiApiKey: e(process.env.OPENAI_API_KEY),
+  openAiModel: e(process.env.OPENAI_MODEL) || 'gpt-4o-mini',
 };

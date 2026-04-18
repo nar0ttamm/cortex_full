@@ -10,7 +10,7 @@ import { beginEslCallPipeline, stopEslCallPipeline } from './callMediaPipeline';
 /**
  * FreeSWITCH ESL bridge: real outbound calls via Telnyx gateway when USE_ESL_ORIGINATE is enabled.
  * Full RTP ↔ STT/TTS pipeline is still TODO; with ESL enabled we only originate & park to avoid
- * burning Deepgram/Gemini without real media.
+ * burning Deepgram/OpenAI without real media.
  */
 
 interface OriginateOptions {

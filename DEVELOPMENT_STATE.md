@@ -77,7 +77,7 @@ Central trimmed env: `DATABASE_URL`, `ENCRYPTION_KEY`, `CALLING_MODE`, `CALL_DEL
 - **HTTP:** Express on **`PORT`** (default **5000**), bind **`0.0.0.0`** (`LISTEN_HOST` override)
 - **DB:** `pg` **Pool** built from **`parseIntoClientConfig(DATABASE_URL)`** with explicit fields; **IPv4-only path:** `dns.resolve4(hostname)` for non-literal hosts (avoids IPv6-only Supabase direct host on GCP)
 - **ESL:** **`modesl`** — `eslClient.ts`: connect/auth timeouts, **`originate` → &park()**, `uuid_kill`
-- **AI deps (stub / simulated path):** Deepgram, Gemini, axios, ws — used by **`speechRecognition.ts`**, **`conversationEngine.ts`**, **`voiceSynthesis.ts`**
+- **AI deps (stub / simulated path):** Deepgram, OpenAI, axios, ws — used by **`speechRecognition.ts`**, **`conversationEngine.ts`**, **`voiceSynthesis.ts`**
 
 ### 3.2 Runtime modules (`src/`)
 

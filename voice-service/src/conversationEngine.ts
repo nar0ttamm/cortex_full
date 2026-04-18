@@ -1,8 +1,7 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
 
 /**
- * AI conversation engine: Gemini or OpenAI, streaming for low first-word latency.
+ * AI conversation engine: OpenAI streaming for low first-word latency.
  */
 
 interface Message {
@@ -39,41 +38,14 @@ const END_SIGNALS = [
   'no thank you', 'not now', 'have a good day', 'talk to you later',
 ];
 
-function getEffectiveLlmProvider(): 'openai' | 'gemini' {
-  const explicit = (process.env.LLM_PROVIDER || '').trim().toLowerCase();
-  if (explicit === 'openai') return 'openai';
-  if (explicit === 'gemini') return 'gemini';
-  // When both keys exist, default used to be Gemini → post-call summarize hit 429 and CRM never got slots.
-  // Prefer OpenAI whenever its key is set (streaming + summarize stay aligned).
-  if (process.env.OPENAI_API_KEY?.trim()) return 'openai';
-  if (process.env.GEMINI_API_KEY?.trim()) return 'gemini';
-  return 'gemini';
-}
-
-/** True when the configured LLM provider has an API key. */
+/** True when OpenAI is configured. */
 export function hasLlmConfigured(): boolean {
-  const p = getEffectiveLlmProvider();
-  if (p === 'openai') return Boolean(process.env.OPENAI_API_KEY?.trim());
-  return Boolean(process.env.GEMINI_API_KEY?.trim());
+  return Boolean(process.env.OPENAI_API_KEY?.trim());
 }
 
 /** Non-secret summary for logs and /health. */
-export function getLlmRuntimeSummary(): { provider: 'openai' | 'gemini'; model: string } {
-  const p = getEffectiveLlmProvider();
-  if (p === 'openai') {
-    return { provider: 'openai', model: (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim() };
-  }
-  return { provider: 'gemini', model: (process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim() };
-}
-
-/**
- * Gemini `startChat` history must start with role `user`, not `model`.
- * Our pipeline prepends the spoken greeting as `assistant` first — strip that prefix for the API.
- */
-function trimHistoryForGeminiChat(history: Message[]): Message[] {
-  let i = 0;
-  while (i < history.length && history[i].role === 'assistant') i += 1;
-  return history.slice(i);
+export function getLlmRuntimeSummary(): { provider: 'openai'; model: string } {
+  return { provider: 'openai', model: (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim() };
 }
 
 /** OpenAI chat expects system + alternating user/assistant; fold leading assistant turns into system context. */
@@ -143,71 +115,19 @@ async function streamOpenAi(
   return fullResponse;
 }
 
-async function streamGemini(
-  history: Message[],
-  onChunk: (chunk: string) => Promise<void>
-): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const modelId = (process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim();
-  const model = genAI.getGenerativeModel({
-    model: modelId,
-    systemInstruction: { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
-  });
-
-  const trimmed = trimHistoryForGeminiChat(history);
-  if (trimmed.length === 0) {
-    throw new Error('No messages after trimming assistant-only prefix');
-  }
-  const lastMessage = trimmed[trimmed.length - 1];
-  if (lastMessage.role !== 'user') {
-    throw new Error('Expected last message to be user turn');
-  }
-
-  const geminiHistory = trimmed.slice(0, -1).map(msg => ({
-    role: msg.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: msg.content }],
-  }));
-
-  const chat = model.startChat({ history: geminiHistory });
-
-  const result = await chat.sendMessageStream(lastMessage.content);
-
-  let fullResponse = '';
-  let buffer = '';
-
-  for await (const chunk of result.stream) {
-    const text = chunk.text();
-    buffer += text;
-    fullResponse += text;
-
-    const sentenceEnd = buffer.lastIndexOf('. ');
-    if (sentenceEnd > 0) {
-      const sentence = buffer.slice(0, sentenceEnd + 1).trim();
-      if (sentence) await onChunk(sentence);
-      buffer = buffer.slice(sentenceEnd + 2);
-    }
-  }
-
-  if (buffer.trim()) {
-    await onChunk(buffer.trim());
-  }
-
-  return fullResponse;
-}
+const emptySummary = (): CallSummary => ({
+  text: '',
+  outcome: 'unknown',
+  appointment_requested: false,
+  proposed_appointment_iso: null,
+});
 
 export const conversationEngine = {
   async streamResponse(
     history: Message[],
     onChunk: (chunk: string) => Promise<void>
   ): Promise<string> {
-    const provider = getEffectiveLlmProvider();
-    if (provider === 'openai') {
-      return streamOpenAi(history, onChunk);
-    }
-    return streamGemini(history, onChunk);
+    return streamOpenAi(history, onChunk);
   },
 
   shouldEndCall(responseText: string): boolean {
@@ -234,71 +154,38 @@ Rules for proposed_appointment_iso:
 Transcript:
 ${transcript}`;
 
-    const provider = getEffectiveLlmProvider();
-
-    if (provider === 'openai') {
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (!apiKey) return { text: '', outcome: 'unknown', appointment_requested: false, proposed_appointment_iso: null };
-      try {
-        const model = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
-        const client = new OpenAI({ apiKey });
-        const res = await client.chat.completions.create({
-          model,
-          messages: [{ role: 'user', content: prompt }],
-          response_format: { type: 'json_object' },
-        });
-        const text = res.choices[0]?.message?.content?.trim() ?? '';
-        if (text) {
-          const parsed = JSON.parse(text);
-          const iso =
-            typeof parsed.proposed_appointment_iso === 'string' && parsed.proposed_appointment_iso.trim()
-              ? parsed.proposed_appointment_iso.trim()
-              : null;
-          const out = {
-            text: parsed.summary || '',
-            outcome: parsed.outcome || 'unknown',
-            appointment_requested: Boolean(parsed.appointment_requested),
-            proposed_appointment_iso: iso,
-          };
-          console.log(
-            `[conversationEngine.summarize] openai ok outcome=${out.outcome} appointment_requested=${out.appointment_requested} proposed_iso=${iso ? 'yes' : 'no'}`
-          );
-          return out;
-        }
-      } catch (err: any) {
-        console.error('[conversationEngine.summarize]', err.message);
-      }
-      return { text: '', outcome: 'unknown', appointment_requested: false, proposed_appointment_iso: null };
-    }
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return { text: '', outcome: 'unknown', appointment_requested: false, proposed_appointment_iso: null };
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const modelId = (process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim();
-    const model = genAI.getGenerativeModel({ model: modelId });
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return emptySummary();
 
     try {
-      const result = await model.generateContent(prompt);
-      const text = result.response.text().trim();
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
+      const model = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
+      const client = new OpenAI({ apiKey });
+      const res = await client.chat.completions.create({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+      });
+      const text = res.choices[0]?.message?.content?.trim() ?? '';
+      if (text) {
+        const parsed = JSON.parse(text);
         const iso =
           typeof parsed.proposed_appointment_iso === 'string' && parsed.proposed_appointment_iso.trim()
             ? parsed.proposed_appointment_iso.trim()
             : null;
-        return {
+        const out = {
           text: parsed.summary || '',
           outcome: parsed.outcome || 'unknown',
-          appointment_requested: parsed.appointment_requested || false,
+          appointment_requested: Boolean(parsed.appointment_requested),
           proposed_appointment_iso: iso,
         };
+        console.log(
+          `[conversationEngine.summarize] openai ok outcome=${out.outcome} appointment_requested=${out.appointment_requested} proposed_iso=${iso ? 'yes' : 'no'}`
+        );
+        return out;
       }
     } catch (err: any) {
       console.error('[conversationEngine.summarize]', err.message);
     }
-
-    return { text: '', outcome: 'unknown', appointment_requested: false, proposed_appointment_iso: null };
+    return emptySummary();
   },
 };

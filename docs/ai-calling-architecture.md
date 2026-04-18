@@ -1,6 +1,6 @@
 # CortexFlow — Phase D AI Calling Architecture
 
-Production-oriented overview of the real-time voice pipeline (Telnyx SIP → FreeSWITCH → Node → Deepgram / Gemini / ElevenLabs → CRM).
+Production-oriented overview of the real-time voice pipeline (Telnyx SIP → FreeSWITCH → Node → Deepgram / OpenAI / ElevenLabs → CRM).
 
 ---
 
@@ -24,7 +24,7 @@ Production-oriented overview of the real-time voice pipeline (Telnyx SIP → Fre
                              │         │  mod_audio_fork)               │        │
                              │         ▼                               │        │
                              │  ┌──────────────┐  ┌─────────┐  ┌──────────────┐  │
-                             │  │ Deepgram STT │  │ Gemini  │  │ ElevenLabs   │  │
+                             │  │ Deepgram STT │  │ OpenAI  │  │ ElevenLabs   │  │
                              │  │ (stream)     │  │ (stream)│  │ TTS (stream) │  │
                              │  └──────────────┘  └─────────┘  └──────────────┘  │
                              │         │                               │        │
@@ -47,7 +47,7 @@ Production-oriented overview of the real-time voice pipeline (Telnyx SIP → Fre
 2. **Telephony** — FreeSWITCH originates via ESL (`originate` … `&park()` or equivalent), using configured Telnyx SIP gateway.
 3. **Media tap (Step 1)** — When the channel is active, FreeSWITCH `uuid_audio_fork` streams **raw PCM** (target: **16 kHz mono PCM16**) to `ws://…/audio-in/:call_id?token=…`.
 4. **STT (Step 2)** — Node forwards audio chunks to **Deepgram** streaming; partial and final transcripts drive turn-taking.
-5. **LLM (Step 3)** — On endpoint (pause / sentence), Node sends context to **Gemini**; short Hinglish-style replies (5–12 words) for latency.
+5. **LLM (Step 3)** — On endpoint (pause / sentence), Node sends context to **OpenAI**; short Hinglish-style replies (5–12 words) for latency.
 6. **TTS (Step 4)** — Reply text streams to **ElevenLabs**; audio chunks are buffered for playback.
 7. **Playback (Step 5)** — Synthesized audio is injected back into the call leg (FreeSWITCH playback API / channel write — implementation follows media direction chosen on VM).
 8. **Barge-in (Step 6)** — While AI speaks, STT/VAD detects user speech; Node cancels TTS and playback, resumes capture.
@@ -64,7 +64,7 @@ Production-oriented overview of the real-time voice pipeline (Telnyx SIP → Fre
 | **FreeSWITCH** | SIP, RTP, ESL control, `uuid_audio_fork` egress, future playback ingress. |
 | **cortex_voice (Node)** | HTTP API, WebSocket ingress, orchestration, provider SDKs. |
 | **Deepgram** | Streaming STT. |
-| **Gemini** | Streaming / fast-turn LLM. |
+| **OpenAI** | Streaming / fast-turn LLM. |
 | **ElevenLabs** | Streaming TTS (Indian English / neutral voice selection in config). |
 | **Redis** | Ephemeral call session and coordination (barge-in, pipeline state). |
 | **Supabase / backend** | Durable calls, transcripts, lead updates. |
@@ -94,7 +94,7 @@ Production-oriented overview of the real-time voice pipeline (Telnyx SIP → Fre
 ### End-to-end loop (Steps 2–8)
 
 - **ESL events**: On startup, `initEslVoiceHooks()` subscribes to `CHANNEL_ANSWER` / `CHANNEL_HANGUP_COMPLETE` on the shared inbound ESL socket (`eslVoiceHooks.ts`).
-- **After answer**: `beginEslCallPipeline` — `uuid_audio_fork` → WebSocket → Deepgram (`DEEPGRAM_SAMPLE_RATE=16000`) → Gemini (Hinglish, short turns) → ElevenLabs (default `TTS_PROVIDER=elevenlabs`, PCM16 → downsample to 8 kHz WAV) → `uuid_broadcast` to the leg.
+- **After answer**: `beginEslCallPipeline` — `uuid_audio_fork` → WebSocket → Deepgram (`DEEPGRAM_SAMPLE_RATE=16000`) → OpenAI (Hinglish, short turns) → ElevenLabs (default `TTS_PROVIDER=elevenlabs`, PCM16 → downsample to 8 kHz WAV) → `uuid_broadcast` to the leg.
 - **Barge-in**: Deepgram `SpeechStarted` + `uuid_break` stops playback; generation counter drops stale TTS chunks.
 - **Redis**: `REDIS_URL` optional; `sessionStore` mirrors tail state to Redis or in-memory (`sessionStore.ts`).
 - **CRM**: `call_events` rows for `call_answered`, `stt_final`, `ai_reply`, `pipeline_stopped`; `saveCallResult` + `notifyBackendCallResult` on teardown (`callMediaPipeline.ts`, `freeswitchBridge.ts`).

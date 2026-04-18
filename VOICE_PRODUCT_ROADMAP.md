@@ -12,7 +12,7 @@
 | Stage | Name | Status | Owner / notes |
 |-------|------|--------|----------------|
 | 0 | Scope lock | **Done** (2026-04-14) — see Stage 0 charter | Confirm on standup if wider team ACK needed |
-| 1 | Real audio path | **In progress → largely working** (2026-04-18) — FreeSWITCH `mod_audio_fork` → Node WS → Deepgram STT → **OpenAI** (or Gemini) LLM → TTS → `uuid_broadcast`; metrics in `pm2 logs \| grep '\[metrics\]'` | Exit demo + limitation list still to formalize |
+| 1 | Real audio path | **In progress → largely working** (2026-04-18) — FreeSWITCH `mod_audio_fork` → Node WS → Deepgram STT → **OpenAI** LLM → TTS → `uuid_broadcast`; metrics in `pm2 logs \| grep '\[metrics\]'` | Exit demo + limitation list still to formalize |
 | 2 | CRM + lifecycle | **In progress** — same + **post-call slot → CRM calendar** when LLM returns **`proposed_appointment_iso`** (`appointmentFromCall` → lead `metadata` like `/appointments`) | Manual QA matrix per outcome still open |
 | 3 | Conversation quality | ☐ Not started · ☐ In progress · ☐ Done | Barge-in, endpointing, Hindi TTS path |
 | 4 | Hardening | ☐ Not started · ☐ In progress · ☐ Done | |
@@ -76,7 +76,7 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
 | **Warm transfer** (in scope / out of scope) | **Out of scope** for v1. |
 | **PII / audio retention** (e.g. no audio retention v1) | **No recorded calls.** Minimize retention: prefer **structured fields + short summary** in CRM over full transcripts; align exact DB columns in Stage 2. |
 | **Budget band** per minute (rough INR or USD) | **TBD** — set after Stage 1 provider spike / metered test. |
-| **Allowed APIs** (e.g. OpenAI + Deepgram + ElevenLabs; or “TBD”) | **TBD shortlist**; must support **streaming**, **Indian English + Hindi/Hinglish**, and **low latency**. Existing deps in repo include Deepgram / Gemini stubs — final vendors chosen in Stage 1. |
+| **Allowed APIs** (e.g. OpenAI + Deepgram + ElevenLabs; or “TBD”) | **TBD shortlist**; must support **streaming**, **Indian English + Hindi/Hinglish**, and **low latency**. Existing deps in repo include Deepgram + OpenAI — final vendors chosen in Stage 1. |
 | **Explicit v1 exclusions** (bullet list) | No **call recording**. No **warm transfer**. **Concurrency / load targets** deferred. **Inbound IVR** not in v1 unless scope changes. **Regional Indian languages** (Tamil, Telugu, …) **not** committed unless separately scoped. |
 
 ### How v1 achieves “interest %” + callback / meeting (product ↔ engineering)
@@ -120,7 +120,7 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
 ### Checklist — pipeline (minimal viable)
 
 - [x] **Streaming STT** integrated (Deepgram live; WebSocket).
-- [x] **LLM** receives history + system prompt; **streaming** + sentence chunking for TTS (OpenAI or Gemini).
+- [x] **LLM** receives history + system prompt; **streaming** + sentence chunking for TTS (OpenAI).
 - [x] **Chunked TTS** (WAV to shared dir + `uuid_broadcast`) — telephony 8 kHz PCM path.
 - [x] **Session lifecycle:** ESL pipeline start/stop (`callMediaPipeline`); teardown on hangup.
 

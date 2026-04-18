@@ -186,7 +186,7 @@ curl -X POST https://cortex-backend-api.vercel.app/v1/calls/start \
 |-----------------|-----------------|
 | Deepgram STT    | ~$0.80          |
 | Deepgram TTS    | ~$0.30          |
-| Gemini 1.5 Flash| ~$0.10          |
+| OpenAI (gpt-4o-mini) | ~$0.10–0.20   |
 | Telnyx SIP      | ~$0.60          |
 | GCP VM (shared) | ~$0.08          |
 | **Total**       | **~$1.88**      |

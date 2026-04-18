@@ -133,7 +133,7 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     return;
   }
   if (!process.env.DEEPGRAM_API_KEY || !hasLlmConfigured()) {
-    console.error(`[pipeline:${callId}] Missing DEEPGRAM_API_KEY or LLM keys (GEMINI_API_KEY / OPENAI_API_KEY per LLM_PROVIDER) — cannot start pipeline`);
+    console.error(`[pipeline:${callId}] Missing DEEPGRAM_API_KEY or OPENAI_API_KEY — cannot start pipeline`);
     return;
   }
   if (pipelines.has(callId)) return;

@@ -1,6 +1,6 @@
 # Manual setup — AI voice stack
 
-Configure **`voice-service/.env`** on the GCP VM (see **`.env.example`** for names). Vendor dashboards: Supabase, Google AI Studio, Deepgram, ElevenLabs, Telnyx.
+Configure **`voice-service/.env`** on the GCP VM (see **`.env.example`** for names). Vendor dashboards: Supabase, OpenAI, Deepgram, ElevenLabs, Telnyx.
 
 ---
 
@@ -10,9 +10,9 @@ Use the **Session pooler** URI (IPv4), not direct `db.*`. URL-encode special cha
 
 ---
 
-## Google AI (Gemini)
+## OpenAI (LLM)
 
-`GEMINI_API_KEY` — not OpenAI by default. Set **`GEMINI_MODEL`** (e.g. `gemini-2.0-flash`). Unversioned ids like `gemini-1.5-flash` often return **404** from the current Generative Language API.
+Set **`OPENAI_API_KEY`** (required for streaming replies and post-call JSON summary). Optional **`OPENAI_MODEL`** (default **`gpt-4o-mini`**).
 
 ---
 

@@ -61,7 +61,7 @@ router.post('/call/flow', asyncHandler(async (req, res) => {
     try {
       analysis = await analyzeTranscript({ tenantId, transcript, lead });
     } catch (err) {
-      console.error('[call/flow] Gemini failed:', err.message);
+      console.error('[call/flow] OpenAI transcript analysis failed:', err.message);
     }
   }
 
@@ -133,7 +133,7 @@ router.post('/call/status', asyncHandler(async (req, res) => {
       try {
         analysis = await analyzeTranscript({ tenantId, transcript, lead: targetLead });
       } catch (err) {
-        console.error('[call/status] Gemini failed:', err.message);
+        console.error('[call/status] OpenAI transcript analysis failed:', err.message);
       }
     }
   }

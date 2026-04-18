@@ -25,7 +25,7 @@
 CortexFlow is a multi-tenant SaaS CRM with AI-powered lead management. When a new lead enters the system, the platform automatically:
 - Sends email + WhatsApp notifications to the admin and lead
 - Schedules an AI phone call via Exotel within 2 minutes
-- Records the call, transcribes it via Deepgram, and analyzes it via Gemini
+- Records the call, transcribes it via Deepgram, and analyzes it via OpenAI
 - Schedules appointment reminders automatically
 - Logs all communications (email, WhatsApp, calls) per lead in the CRM
 
@@ -64,7 +64,7 @@ CortexFlow is a multi-tenant SaaS CRM with AI-powered lead management. When a ne
 │  leads,           │  │                                   │
 │  credentials,     │  │  FreeSWITCH + SIP Trunk           │
 │  calls,           │  │  Deepgram STT (streaming)         │
-│  call_transcripts,│  │  Gemini 1.5 Flash (LLM)           │
+│  call_transcripts,│  │  OpenAI (LLM, e.g. gpt-4o-mini)   │
 │  call_events,     │  │  Deepgram Aura TTS                │
 │  integrations,    │  │  VAD + conversation engine        │
 │  integration_logs │  └──────────────────────────────────┘
@@ -83,7 +83,7 @@ Lead Ingest → POST /v1/calls/start → cortex_voice /voice/start-call
                                            ↓
                           VAD endpointing (300ms silence = final)
                                            ↓
-                        Gemini 1.5 Flash (streaming, sentence chunks)
+                        OpenAI (streaming, sentence chunks)
                                            ↓
                            Deepgram Aura TTS (audio chunks)
                                            ↓
@@ -127,7 +127,7 @@ Zapier-compatible response { id, status }
 | Auth | Supabase Auth (`@supabase/ssr`) |
 | Telephony | FreeSWITCH + SIP trunk (Telnyx/Twilio SIP) |
 | STT | Deepgram streaming (nova-2, `endpointing: 300ms`) |
-| AI LLM | Google Gemini 1.5 Flash (streaming) |
+| AI LLM | OpenAI (e.g. gpt-4o-mini, streaming) |
 | TTS | Deepgram Aura (streaming, ~$0.015/1K chars) |
 | Lead Integrations | Meta Lead Ads, Google, IndiaMART, Justdial, Zapier, Typeform, Tally |
 | Email | Resend |
@@ -164,7 +164,7 @@ AI calling and CRM/          ← Root workspace
 │   ├── services/
 │   │   ├── leadService.js
 │   │   ├── notificationService.js
-│   │   ├── aiService.js     ← Deepgram + Gemini (post-call analysis)
+│   │   ├── aiService.js     ← Deepgram + OpenAI (post-call analysis)
 │   │   └── callService.js   ← Exotel + TwiML (legacy)
 │   ├── jobs/
 │   │   ├── callScheduler.js ← Process pending calls
@@ -180,7 +180,7 @@ AI calling and CRM/          ← Root workspace
 │   │   ├── callController.ts    ← POST /voice/start-call|end-call|call-result
 │   │   ├── freeswitchBridge.ts  ← FreeSWITCH ESL + conversation pipeline
 │   │   ├── speechRecognition.ts ← Deepgram streaming STT
-│   │   ├── conversationEngine.ts← Gemini 1.5 Flash streaming LLM
+│   │   ├── conversationEngine.ts← OpenAI streaming LLM
 │   │   ├── voiceSynthesis.ts    ← Deepgram Aura TTS (or Google TTS)
 │   │   └── callStorage.ts       ← DB writes for calls/transcripts/events
 │   ├── .env.example
@@ -344,7 +344,7 @@ AI calling and CRM/          ← Root workspace
 |---|---|---|
 | id | UUID PK | |
 | tenant_id | UUID FK | |
-| service | TEXT | twilio / resend / exotel / deepgram / gemini |
+| service | TEXT | twilio / resend / exotel / deepgram / openai |
 | encrypted_data | TEXT | AES-256 encrypted JSON |
 | is_active | BOOLEAN | |
 | created_at | TIMESTAMPTZ | |
@@ -464,6 +464,8 @@ ADMIN_TOKEN=                   # Secret for /v1/admin/* routes
 CRON_SECRET=                   # Secret for /v1/internal/* routes
 VOICE_SERVICE_URL=             # https://voice.cortexflow.in (GCP VPS)
 VOICE_SECRET=                  # Shared secret between backend and voice service
+OPENAI_API_KEY=                # Post-call transcript analysis (if no per-tenant openai credentials)
+OPENAI_MODEL=                  # Optional; default gpt-4o-mini
 ```
 
 ### cortex_voice (`voice-service/.env` on GCP VPS)
@@ -471,7 +473,8 @@ VOICE_SECRET=                  # Shared secret between backend and voice service
 PORT=5000
 DATABASE_URL=                  # Same Supabase DB
 DEEPGRAM_API_KEY=              # Used for both STT and TTS
-GEMINI_API_KEY=
+OPENAI_API_KEY=                # Streaming LLM + post-call summary
+OPENAI_MODEL=gpt-4o-mini       # Optional model id
 TTS_PROVIDER=deepgram          # deepgram | google
 FREESWITCH_HOST=127.0.0.1
 FREESWITCH_ESL_PORT=8021
@@ -493,7 +496,7 @@ NEXT_PUBLIC_DEFAULT_TENANT_ID= # b50750c7-0a91-4cd4-80fa-8921f974a8ec
 - `resend` → `{ api_key, from_email }`
 - `exotel` → `{ account_sid, api_key, api_token, subdomain, caller_id }`
 - `deepgram` → `{ api_key }`
-- `gemini` → `{ api_key }`
+- `openai` → `{ api_key, model? }`
 
 ---
 
@@ -520,8 +523,8 @@ NEXT_PUBLIC_DEFAULT_TENANT_ID= # b50750c7-0a91-4cd4-80fa-8921f974a8ec
 - **Status:** Configured, triggered after real Exotel calls
 - **Usage:** Called in `POST /v1/call/status` after recording URL received
 
-### Gemini (AI Analysis)
-- **Status:** Configured
+### OpenAI (AI Analysis)
+- **Status:** Configured (tenant `credentials.service=openai` or backend `OPENAI_API_KEY`)
 - **Usage:** Analyzes call transcript to extract: `{ interested, appointment_requested, call_result, summary }`
 
 ### cron-job.org (External Cron)
@@ -562,7 +565,7 @@ NEXT_PUBLIC_DEFAULT_TENANT_ID= # b50750c7-0a91-4cd4-80fa-8921f974a8ec
 2. POST /v1/call/status (on call end):
    - Download recording URL
    - Send to Deepgram → transcript
-   - Send transcript to Gemini → { interested, appointment_requested, call_result }
+   - Send transcript to OpenAI → { interested, appointment_requested, call_result }
    - Update lead status + metadata
    - If appointment_requested: set appointment_status = Scheduled
 ```
@@ -623,7 +626,7 @@ cd landing && npx vercel --prod --yes
 - [x] AI call scheduling via cron (simulated mode)
 - [x] Exotel call flow + status webhooks
 - [x] Deepgram transcription integration
-- [x] Gemini AI analysis integration
+- [x] OpenAI AI analysis integration
 - [x] Appointment scheduling + reminder cron
 - [x] Inbound email webhook (Resend)
 - [x] CRM Dashboard with stats + activity feed
@@ -652,7 +655,7 @@ cd landing && npx vercel --prod --yes
   - `voice-service/` — standalone Node.js service, port 5000, deployed separately from Vercel
   - FreeSWITCH ESL bridge (`freeswitchBridge.ts`) — outbound call origination via SIP trunk
   - Deepgram streaming STT (`speechRecognition.ts`) — nova-2 model, 300ms VAD endpointing
-  - Gemini 1.5 Flash streaming LLM (`conversationEngine.ts`) — sentence-chunk streaming for <500ms latency
+  - OpenAI streaming LLM (`conversationEngine.ts`) — sentence-chunk streaming for <500ms latency
   - Deepgram Aura TTS (`voiceSynthesis.ts`) — streaming audio, ~$0.015/1K chars
   - Call storage (`callStorage.ts`) — writes to `calls`, `call_transcripts`, `call_events` tables
   - Internal API: `POST /voice/start-call`, `POST /voice/end-call`, `POST /voice/call-result`
