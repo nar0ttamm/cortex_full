@@ -1,0 +1,2 @@
+# Shell scripts must use LF so they run on Linux when piped to bash
+*.sh text eol=lf
