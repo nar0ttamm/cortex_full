@@ -46,7 +46,7 @@ function collectTtsWarnings(): string[] {
   const hasElKey = Boolean((process.env.ELEVENLABS_API_KEY || '').trim());
   if (req !== 'elevenlabs' && (hasElId || hasElKey)) {
     w.push(
-      'ElevenLabs env vars are set but TTS_PROVIDER is not elevenlabs — audio still uses Deepgram Aura. Set TTS_PROVIDER=elevenlabs (and keep ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID).'
+      'ELEVENLABS_* present in env but TTS uses Deepgram while TTS_PROVIDER≠elevenlabs (remove EL vars or set TTS_PROVIDER=elevenlabs to use them).'
     );
   }
   if (req === 'elevenlabs') {
