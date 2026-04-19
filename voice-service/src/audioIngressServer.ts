@@ -11,6 +11,13 @@ const PCM16_MONO_16K_BPS = 16000 * 2;
 
 const consumers = new Map<string, (buf: Buffer) => void>();
 let warnedOpenIngress = false;
+let warnedOptionalIngress = false;
+
+/** When false, mod_audio_fork may omit ?token= on the WS URL; ingress must not be public. */
+function ingressTokenRequired(): boolean {
+  const requireToken = (process.env.AUDIO_INGRESS_REQUIRE_TOKEN ?? 'true').trim().toLowerCase();
+  return !(requireToken === 'false' || requireToken === '0' || requireToken === 'no');
+}
 
 export function registerAudioConsumer(callId: string, onPcm: (buf: Buffer) => void): () => void {
   consumers.set(callId, onPcm);
@@ -20,12 +27,7 @@ export function registerAudioConsumer(callId: string, onPcm: (buf: Buffer) => vo
 }
 
 function getIngressSecret(): string | undefined {
-  // Set AUDIO_INGRESS_REQUIRE_TOKEN=false to omit ?token= on the WS URL (fixes some FS/ESL parsers).
-  // Prefer locking port 5000 to localhost / VPN if you disable token (public 5000 + open ingress is unsafe).
-  const requireToken = (process.env.AUDIO_INGRESS_REQUIRE_TOKEN ?? 'true').trim().toLowerCase();
-  if (requireToken === 'false' || requireToken === '0' || requireToken === 'no') {
-    return undefined;
-  }
+  if (!ingressTokenRequired()) return undefined;
   return (process.env.AUDIO_INGRESS_SECRET || process.env.VOICE_SECRET || '').trim() || undefined;
 }
 
@@ -118,9 +120,16 @@ export function attachAudioIngressWss(server: HttpServer): void {
       socket.destroy();
       return;
     }
-    if (!secret && !warnedOpenIngress) {
-      warnedOpenIngress = true;
-      console.warn('[audio-in] AUDIO_INGRESS_SECRET and VOICE_SECRET are empty — ingress is open (dev only)');
+    if (ingressTokenRequired()) {
+      if (!secret && !warnedOpenIngress) {
+        warnedOpenIngress = true;
+        console.warn('[audio-in] AUDIO_INGRESS_SECRET and VOICE_SECRET are empty — ingress is open (dev only)');
+      }
+    } else if (!warnedOptionalIngress) {
+      warnedOptionalIngress = true;
+      console.warn(
+        '[audio-in] AUDIO_INGRESS_REQUIRE_TOKEN=false — WS ingress accepts connections without ?token= (mod_audio_fork compatibility). Do not expose TCP 5000 publicly while token checks are off.'
+      );
     }
 
     wss.handleUpgrade(req, socket, head, ws => {
