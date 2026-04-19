@@ -5,7 +5,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useNotifications } from '../contexts/NotificationContext';
 import { createClient } from '@/lib/supabase/client';
-import { DEFAULT_TENANT_ID } from '@/lib/tenantConfig';
 
 const NAV = [
   {
@@ -40,15 +39,6 @@ const NAV = [
         <rect x="3" y="3" width="4" height="18" rx="1" />
         <rect x="10" y="6" width="4" height="15" rx="1" />
         <rect x="17" y="9" width="4" height="12" rx="1" />
-      </svg>
-    ),
-  },
-  {
-    href: '/analytics',
-    label: 'Analytics',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px] shrink-0">
-        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
       </svg>
     ),
   },
@@ -116,6 +106,7 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [tenantName, setTenantName] = useState<string>('');
+  const [tenantId, setTenantId] = useState<string | null>(null);
   const { badge, markSeen } = useNotifications();
 
   const handleLogout = async () => {
@@ -123,14 +114,22 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
     await supabase.auth.signOut();
     router.push('/login');
   };
-  const tenantId = DEFAULT_TENANT_ID;
-
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/tenant/${tenantId}`)
-      .then(r => r.json())
-      .then(d => setTenantName(d.tenant?.name || ''))
+    fetch('/api/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.tenantId) setTenantId(d.tenantId);
+      })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!tenantId || !process.env.NEXT_PUBLIC_API_URL) return;
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/tenant/${tenantId}`)
+      .then((r) => r.json())
+      .then((d) => setTenantName(d.tenant?.name || ''))
+      .catch(() => {});
+  }, [tenantId]);
 
   // Mark notifications seen when landing on /leads
   useEffect(() => {

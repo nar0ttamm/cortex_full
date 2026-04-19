@@ -1,9 +1,13 @@
-// API route for CRM data operations — Supabase via Backend API (multitenant)
-// NOTE: Route path kept as /api/sheets to avoid breaking existing page calls.
+// CRM lead data (Supabase via backend API, multitenant). Replaces legacy /api/sheets.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { getLeadsFromSupabase, getLeadFromSupabase, createLeadInSupabase, updateLeadInSupabase } from '@/lib/supabase-client';
+import {
+  getLeadsFromSupabase,
+  getLeadFromSupabase,
+  createLeadInSupabase,
+  updateLeadInSupabase,
+} from '@/lib/supabase-client';
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,13 +28,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ lead });
     }
 
-    return NextResponse.json({ error: 'Invalid action. Use ?action=leads or ?action=lead&id=<uuid>' }, { status: 400 });
-  } catch (error: any) {
-    if (error.message === 'Authentication required') {
+    return NextResponse.json(
+      { error: 'Invalid action. Use ?action=leads or ?action=lead&id=<uuid>' },
+      { status: 400 }
+    );
+  } catch (error: unknown) {
+    const err = error as { message?: string };
+    if (err.message === 'Authentication required') {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
-    console.error('[SHEETS-API] GET error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    console.error('[CRM-DATA] GET error:', error);
+    return NextResponse.json(
+      { error: err.message || 'Internal server error' },
+      { status: 500 }
+    );
   }
 }
 
@@ -55,11 +66,15 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
-  } catch (error: any) {
-    if (error.message === 'Authentication required') {
+  } catch (error: unknown) {
+    const err = error as { message?: string };
+    if (err.message === 'Authentication required') {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
-    console.error('[SHEETS-API] POST error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    console.error('[CRM-DATA] POST error:', error);
+    return NextResponse.json(
+      { error: err.message || 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

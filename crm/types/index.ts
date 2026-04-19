@@ -64,6 +64,21 @@ export interface DashboardStats {
   confirmedAppointments: number;
 }
 
+/** Chart series returned with /api/stats (computed server-side) */
+export interface DashboardAnalyticsPayload {
+  trend: { label: string; value: number; color: string }[];
+  funnel: { label: string; value: number; color: string }[];
+  statusChart: { label: string; value: number; color: string }[];
+  sourceChart: { label: string; value: number; color: string }[];
+  callChart: { label: string; value: number; color: string }[];
+  analyticsKpis: {
+    total: number;
+    interested: number;
+    converted: number;
+    conversionRate: number;
+  };
+}
+
 export interface RecentActivity {
   type: 'lead' | 'call' | 'appointment' | 'followup';
   message: string;

@@ -57,7 +57,7 @@ export default function CommunicationsPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/sheets?action=leads');
+      const res = await fetch('/api/crm-data?action=leads');
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       const all: any[] = data.leads || [];

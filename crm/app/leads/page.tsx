@@ -22,7 +22,7 @@ export default function LeadsPage() {
         setError(null);
       }
 
-      const response = await fetch('/api/sheets?action=leads');
+      const response = await fetch('/api/crm-data?action=leads');
       if (response.status === 401) {
         setError('Please sign in to continue.');
         setTimeout(() => {

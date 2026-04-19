@@ -24,7 +24,7 @@ export function useLeadNotifications(): NotificationState {
 
   const fetchNew = useCallback(async () => {
     try {
-      const res = await fetch('/api/sheets?action=leads');
+      const res = await fetch('/api/crm-data?action=leads');
       if (!res.ok) return;
       const data = await res.json();
       const leads: any[] = data.leads || [];
@@ -50,7 +50,7 @@ export function useLeadNotifications(): NotificationState {
 
   useEffect(() => {
     fetchNew();
-    const interval = setInterval(fetchNew, 30000);
+    const interval = setInterval(fetchNew, 12000);
     return () => clearInterval(interval);
   }, [fetchNew]);
 

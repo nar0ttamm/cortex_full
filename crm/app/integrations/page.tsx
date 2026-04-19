@@ -3,10 +3,9 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 
-import { DEFAULT_TENANT_ID } from '@/lib/tenantConfig';
+import { useTenantId } from '@/app/hooks/useTenantId';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
-const TENANT_ID = DEFAULT_TENANT_ID;
 
 interface Integration {
   id: string;
@@ -85,6 +84,13 @@ function SecretReveal({ callbackFn }: { callbackFn: () => Promise<string> }) {
   const [loading, setLoading] = useState(false);
 
   const reveal = async () => {
+    if (
+      !confirm(
+        'Regenerating invalidates the previous webhook secret. Update any external systems that use it. Continue?'
+      )
+    ) {
+      return;
+    }
     setLoading(true);
     const s = await callbackFn();
     setSecret(s);
@@ -117,6 +123,7 @@ function SecretReveal({ callbackFn }: { callbackFn: () => Promise<string> }) {
 }
 
 export default function IntegrationsPage() {
+  const { tenantId } = useTenantId();
   const [supported, setSupported] = useState<SupportedIntegration[]>([]);
   const [connected, setConnected] = useState<Integration[]>([]);
   const [logs, setLogs] = useState<IntegrationLog[]>([]);
@@ -127,12 +134,16 @@ export default function IntegrationsPage() {
   const [activeTab, setActiveTab] = useState<'connected' | 'add' | 'logs'>('connected');
 
   const fetchData = async () => {
+    if (!tenantId || !API_URL) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [sRes, cRes, lRes] = await Promise.all([
         fetch(`${API_URL}/v1/integrations/supported`),
-        fetch(`${API_URL}/v1/integrations/${TENANT_ID}`),
-        fetch(`${API_URL}/v1/integrations/${TENANT_ID}/logs?limit=30`),
+        fetch(`${API_URL}/v1/integrations/${tenantId}`),
+        fetch(`${API_URL}/v1/integrations/${tenantId}/logs?limit=30`),
       ]);
       if (sRes.ok) setSupported((await sRes.json()).integrations || []);
       if (cRes.ok) setConnected((await cRes.json()).integrations || []);
@@ -141,12 +152,15 @@ export default function IntegrationsPage() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    void fetchData();
+  }, [tenantId]);
 
   const connect = async (key: string, label: string) => {
+    if (!tenantId) return;
     setConnecting(key);
     try {
-      const res = await fetch(`${API_URL}/v1/integrations/${TENANT_ID}`, {
+      const res = await fetch(`${API_URL}/v1/integrations/${tenantId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ integration_key: key, label }),
@@ -157,15 +171,17 @@ export default function IntegrationsPage() {
   };
 
   const disconnect = async (key: string, label: string) => {
+    if (!tenantId) return;
     if (!confirm(`Disconnect "${label}"? Leads from this source will stop being received.`)) return;
-    await fetch(`${API_URL}/v1/integrations/${TENANT_ID}/${key}`, { method: 'DELETE' });
+    await fetch(`${API_URL}/v1/integrations/${tenantId}/${key}`, { method: 'DELETE' });
     await fetchData();
   };
 
   const test = async (key: string) => {
+    if (!tenantId) return;
     setTesting(key);
     try {
-      const res = await fetch(`${API_URL}/v1/integrations/${TENANT_ID}/${key}/test`, { method: 'POST' });
+      const res = await fetch(`${API_URL}/v1/integrations/${tenantId}/${key}/test`, { method: 'POST' });
       const data = await res.json();
       const status = data.result?.status;
       setTestResult(prev => ({
@@ -183,7 +199,8 @@ export default function IntegrationsPage() {
   };
 
   const regenerateSecret = async (key: string): Promise<string> => {
-    const res = await fetch(`${API_URL}/v1/integrations/${TENANT_ID}/${key}/regenerate-secret`, { method: 'POST' });
+    if (!tenantId) return '';
+    const res = await fetch(`${API_URL}/v1/integrations/${tenantId}/${key}/regenerate-secret`, { method: 'POST' });
     return (await res.json()).webhook_secret || '';
   };
 

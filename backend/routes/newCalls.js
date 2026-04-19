@@ -224,6 +224,27 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
   }
 }));
 
+// GET /v1/calls/:tenantId/summary — active call count from `calls` table (source of truth for live status)
+router.get('/calls/:tenantId/summary', asyncHandler(async (req, res) => {
+  const tenantId = String(req.params.tenantId || '').trim();
+  const result = await db.query(
+    `SELECT
+       COUNT(*) FILTER (
+         WHERE LOWER(TRIM(status)) = ANY (
+           ARRAY['initiating','ringing','answered','active','dialing']::text[]
+         )
+       )::int AS active_count,
+       COUNT(*)::int AS total_calls
+     FROM calls WHERE tenant_id = $1`,
+    [tenantId]
+  );
+  const row = result.rows[0] || { active_count: 0, total_calls: 0 };
+  return res.json({
+    active_count: Number(row.active_count) || 0,
+    total_calls: Number(row.total_calls) || 0,
+  });
+}));
+
 // GET /v1/calls/:tenantId
 // List calls for a tenant (reads from calls table)
 router.get('/calls/:tenantId', asyncHandler(async (req, res) => {
@@ -255,6 +276,9 @@ router.get('/calls/:tenantId', asyncHandler(async (req, res) => {
   params.push(parseInt(limit, 10));
 
   const result = await db.query(query, params);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[calls:list]', { tenantId, count: result.rows.length, status: status || 'all' });
+  }
   return res.json({ calls: result.rows, count: result.rows.length });
 }));
 

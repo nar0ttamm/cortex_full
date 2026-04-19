@@ -37,7 +37,7 @@ export default function AppointmentsPage() {
   const fetchLeads = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/sheets?action=leads');
+      const res = await fetch('/api/crm-data?action=leads');
       if (!res.ok) return;
       const data = await res.json();
       const all: any[] = data.leads || [];

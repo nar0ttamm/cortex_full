@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
-import { DEFAULT_TENANT_ID } from '@/lib/tenantConfig';
+import { useTenantId } from '@/app/hooks/useTenantId';
 
-const TENANT_ID = DEFAULT_TENANT_ID;
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 interface TenantProfile {
@@ -44,6 +43,7 @@ const FIELDS: { key: keyof TenantProfile; label: string; type?: string; placehol
 ];
 
 export default function TenantPage() {
+  const { tenantId } = useTenantId();
   const [form, setForm] = useState<TenantProfile>({
     name: '', owner_name: '', contact_email: '', whatsapp_number: '',
     phone_number: '', business_type: '', website: '', timezone: 'Asia/Kolkata',
@@ -55,12 +55,15 @@ export default function TenantPage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { fetchTenant(); }, []);
+  useEffect(() => {
+    if (tenantId) void fetchTenant();
+  }, [tenantId]);
 
   const fetchTenant = async () => {
+    if (!tenantId || !API_URL) return;
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/v1/tenant/${TENANT_ID}`);
+      const res = await fetch(`${API_URL}/v1/tenant/${tenantId}`);
       if (!res.ok) throw new Error('Failed to fetch tenant');
       const data = await res.json();
       const t = data.tenant;
@@ -84,11 +87,12 @@ export default function TenantPage() {
   };
 
   const handleSave = async () => {
+    if (!tenantId || !API_URL) return;
     setSaving(true);
     setError(null);
     try {
       const { name, ...rest } = form;
-      const res = await fetch(`${API_URL}/v1/tenant/${TENANT_ID}`, {
+      const res = await fetch(`${API_URL}/v1/tenant/${tenantId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -188,7 +192,7 @@ export default function TenantPage() {
             <div className="min-w-0 flex-1">
               <h2 className="text-xl sm:text-2xl font-bold text-white truncate">{form.name || 'My Business'}</h2>
               <p className="text-teal-100 text-sm mt-1">{form.business_type || 'Business'} · {form.timezone}</p>
-              <p className="text-teal-200/70 text-xs mt-1 font-mono">{TENANT_ID}</p>
+              <p className="text-teal-200/70 text-xs mt-1 font-mono break-all">{tenantId || '—'}</p>
             </div>
             {!editing && (
               <button

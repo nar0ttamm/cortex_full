@@ -4,8 +4,6 @@ import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { AppShell } from '../components/AppShell';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
-
 interface Lead {
   id: string;
   name: string;
@@ -46,7 +44,7 @@ export default function PipelinePage() {
   const fetchLeads = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/sheets?action=leads');
+      const res = await fetch('/api/crm-data?action=leads');
       if (!res.ok) return;
       const data = await res.json();
       setLeads(data.leads || []);
@@ -63,7 +61,7 @@ export default function PipelinePage() {
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
     setUpdating(leadId);
     try {
-      const res = await fetch(`${API_URL}/v1/leads/${leadId}`, {
+      const res = await fetch(`/api/leads/${leadId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),

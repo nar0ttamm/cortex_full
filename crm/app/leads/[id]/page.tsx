@@ -1,15 +1,13 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Lead } from '@/types';
 import { AppShell } from '../../components/AppShell';
 import { fetchCallsForTenant, startAiCall, type CallRow } from '@/lib/callsApi';
-import { DEFAULT_TENANT_ID } from '@/lib/tenantConfig';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
-const TENANT_ID = DEFAULT_TENANT_ID;
+import { useTenantId } from '@/app/hooks/useTenantId';
+import { isCallStatusLive, labelForCallDbStatus } from '@/lib/callStatusUi';
 
 interface Note {
   id: string;
@@ -31,6 +29,8 @@ function timeAgo(iso: string) {
 export default function LeadDetailPage() {
   const params = useParams();
   const leadId = params.id as string;
+  const { tenantId } = useTenantId();
+  const leadCallsRef = useRef<CallRow[]>([]);
   const [lead, setLead] = useState<Lead | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +39,7 @@ export default function LeadDetailPage() {
   const [addingNote, setAddingNote] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const [leadCalls, setLeadCalls] = useState<CallRow[]>([]);
+  leadCallsRef.current = leadCalls;
   const [callsLoading, setCallsLoading] = useState(false);
   const [callActionError, setCallActionError] = useState<string | null>(null);
   const [callActionOk, setCallActionOk] = useState<string | null>(null);
@@ -46,29 +47,41 @@ export default function LeadDetailPage() {
 
   useEffect(() => { fetchLead(); }, [leadId]);
 
-  const fetchLeadCalls = async () => {
-    if (!leadId) return;
+  const fetchLeadCalls = useCallback(async () => {
+    if (!leadId || !tenantId) return;
     setCallsLoading(true);
     try {
-      const data = await fetchCallsForTenant(TENANT_ID, { leadId, limit: 25 });
+      const data = await fetchCallsForTenant(tenantId, { leadId, limit: 25 });
       setLeadCalls(data.calls || []);
     } catch {
       setLeadCalls([]);
     } finally {
       setCallsLoading(false);
     }
-  };
+  }, [leadId, tenantId]);
 
   useEffect(() => {
-    if (leadId) fetchLeadCalls();
-  }, [leadId]);
+    if (leadId && tenantId) void fetchLeadCalls();
+  }, [leadId, tenantId, fetchLeadCalls]);
+
+  useEffect(() => {
+    if (!tenantId) return;
+    const t = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (leadCallsRef.current.some((c) => isCallStatusLive(c.status))) {
+        void fetchLeadCalls();
+      }
+    }, 3500);
+    return () => clearInterval(t);
+  }, [tenantId, fetchLeadCalls]);
 
   const handleStartAiCall = async () => {
+    if (!tenantId) return;
     setCallActionError(null);
     setCallActionOk(null);
     setStartingCall(true);
     try {
-      const res = await startAiCall(TENANT_ID, leadId);
+      const res = await startAiCall(tenantId, leadId);
       setCallActionOk(`Call initiated. ID: ${res.call_id?.slice(0, 8)}…`);
       await fetchLeadCalls();
       await fetchLead();
@@ -84,7 +97,7 @@ export default function LeadDetailPage() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`/api/sheets?action=lead&id=${leadId}`);
+      const response = await fetch(`/api/crm-data?action=lead&id=${leadId}`);
       if (response.status === 401) { window.location.href = '/login'; return; }
       if (!response.ok) throw new Error('Failed to fetch lead');
       const data = await response.json();
@@ -102,14 +115,15 @@ export default function LeadDetailPage() {
     if (!noteText.trim()) return;
     setAddingNote(true);
     try {
-      const res = await fetch(`${API_URL}/v1/leads/${leadId}/notes`, {
+      const res = await fetch(`/api/leads/${leadId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: noteText.trim() }),
       });
       if (!res.ok) throw new Error('Failed to save note');
       const data = await res.json();
-      setNotes(prev => [...prev, data.note]);
+      const note = data.note;
+      if (note) setNotes((prev) => [...prev, note]);
       setNoteText('');
     } catch (e: any) {
       console.error(e.message);
@@ -120,7 +134,7 @@ export default function LeadDetailPage() {
 
   const handleDeleteNote = async (noteId: string) => {
     try {
-      await fetch(`${API_URL}/v1/leads/${leadId}/notes/${noteId}`, { method: 'DELETE' });
+      await fetch(`/api/leads/${leadId}/notes/${noteId}`, { method: 'DELETE' });
       setNotes(prev => prev.filter(n => n.id !== noteId));
     } catch (e) {}
   };
@@ -257,7 +271,9 @@ export default function LeadDetailPage() {
                           <td className="px-3 py-2 text-slate-600 dark:text-slate-300 whitespace-nowrap">
                             {c.created_at ? new Date(c.created_at).toLocaleString() : '—'}
                           </td>
-                          <td className="px-3 py-2 font-semibold text-slate-800 dark:text-slate-100">{c.status}</td>
+                          <td className="px-3 py-2 font-semibold text-slate-800 dark:text-slate-100 transition-colors duration-300">
+                            {labelForCallDbStatus(c.status)}
+                          </td>
                           <td className="px-3 py-2 text-slate-500 dark:text-slate-400 max-w-xs truncate" title={c.error_message || c.summary || ''}>
                             {c.error_message || c.summary || c.outcome || '—'}
                           </td>

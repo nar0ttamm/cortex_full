@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { AppShell } from './components/AppShell';
-import { DashboardStats as DashboardStatsType, RecentActivity } from '@/types';
+import { DashboardStats as DashboardStatsType, RecentActivity, DashboardAnalyticsPayload } from '@/types';
+import { DashboardAnalyticsCharts } from './components/dashboard/DashboardAnalyticsCharts';
 
 const STAT_CONFIGS = [
   { key: 'totalLeads',            label: 'Total Leads',            icon: '👥', color: 'bg-sky-500',     showNew: true  },
@@ -37,6 +38,7 @@ function formatTimeAgo(timestamp: string): string {
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStatsType | null>(null);
+  const [analytics, setAnalytics] = useState<DashboardAnalyticsPayload | null>(null);
   const [activities, setActivities] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -73,6 +75,7 @@ export default function DashboardPage() {
 
       const statsData = await statsRes.json();
       setStats(statsData.stats);
+      setAnalytics(statsData.analytics ?? null);
       setError(null);
 
       if (activityRes.ok) {
@@ -188,6 +191,8 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+
+        <DashboardAnalyticsCharts analytics={analytics} />
 
         {/* Bottom row */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">

@@ -47,7 +47,7 @@ export default function DataManagementPage() {
   const handleExport = async () => {
     setExporting(true);
     try {
-      const response = await fetch('/api/sheets?action=leads');
+      const response = await fetch('/api/crm-data?action=leads');
       const data = await response.json();
       const leads = data.leads || [];
 
@@ -86,7 +86,7 @@ export default function DataManagementPage() {
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await fetch('/api/sheets', {
+      const response = await fetch('/api/crm-data', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
