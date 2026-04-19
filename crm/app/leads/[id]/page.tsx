@@ -8,6 +8,7 @@ import { AppShell } from '../../components/AppShell';
 import { fetchCallsForTenant, startAiCall, type CallRow } from '@/lib/callsApi';
 import { useTenantId } from '@/app/hooks/useTenantId';
 import { isCallStatusLive, labelForCallDbStatus } from '@/lib/callStatusUi';
+import { formatCallOutcome } from '@/lib/leadOutcomeLabels';
 
 interface Note {
   id: string;
@@ -298,7 +299,7 @@ export default function LeadDetailPage() {
                 {lead.call_result && (
                   <div className="mt-3">
                     <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Call Result</p>
-                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{lead.call_result}</p>
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{formatCallOutcome(lead.call_result)}</p>
                     {(lead.appointment_requested === true || lead.metadata?.appointment_requested === true) && (
                       <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
                         Scheduling intent detected — follow up to confirm a slot.

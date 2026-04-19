@@ -34,6 +34,24 @@ const DIR_LABEL: Record<string, string> = {
   to_admin:  '⚙ Admin Alert',
 };
 
+/** Drop near-duplicate rows (e.g. transcript + comm_log call with same body). */
+function dedupeCommEntries(entries: CommEntry[]): CommEntry[] {
+  const seen = new Set<string>();
+  const sorted = [...entries].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+  const out: CommEntry[] = [];
+  for (const e of sorted) {
+    const body = (e.message || e.transcript || e.subject || '').trim().slice(0, 160);
+    const bucket = Math.floor(new Date(e.timestamp).getTime() / 120000);
+    const key = `${e.type}|${e.direction}|${bucket}|${body}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+}
+
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
@@ -91,13 +109,15 @@ export default function CommunicationsPage() {
           });
         }
 
-        if (entries.length > 0) {
+        const merged = dedupeCommEntries(entries);
+
+        if (merged.length > 0) {
           result.push({
             id: lead.id,
             name: lead.name,
             phone: lead.phone,
             email: lead.email,
-            entries: entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
+            entries: merged,
           });
         }
       });
@@ -207,7 +227,8 @@ export default function CommunicationsPage() {
 
         {/* Summary */}
         <p className="text-xs text-slate-400 dark:text-slate-500 mb-4">
-          {totalEntries} {totalEntries === 1 ? 'entry' : 'entries'} across {filtered.length} {filtered.length === 1 ? 'lead' : 'leads'}
+          {totalEntries} {totalEntries === 1 ? 'entry' : 'entries'} across {filtered.length}{' '}
+          {filtered.length === 1 ? 'lead' : 'leads'} · duplicates from transcript + call log merged
         </p>
 
         {/* Per-lead groups */}

@@ -240,8 +240,12 @@ export default function LeadsPage() {
                     {filteredLeads.map((lead, index) => (
                       <tr key={lead.id || index} className="hover:bg-slate-50/70 dark:hover:bg-slate-700/30 transition-colors">
                         <td className="px-5 py-3.5">
-                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{lead.name || 'N/A'}</p>
-                          {lead.source && <p className="text-xs text-slate-400 mt-0.5">{lead.source}</p>}
+                          <Link href={`/leads/${lead.id}`} className="group block">
+                            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
+                              {lead.name || 'N/A'}
+                            </p>
+                            {lead.source && <p className="text-xs text-slate-400 mt-0.5">{lead.source}</p>}
+                          </Link>
                         </td>
                         <td className="px-5 py-3.5">
                           <p className="text-sm text-slate-700 dark:text-slate-200">{lead.phone || 'N/A'}</p>

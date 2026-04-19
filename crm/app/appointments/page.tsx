@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
+import Link from 'next/link';
 import { AppShell } from '../components/AppShell';
 
 interface AppointmentLead {
@@ -144,23 +145,23 @@ export default function AppointmentsPage() {
 
   return (
     <AppShell title="Appointments" actions={actions}>
-      <div className="p-4 sm:p-6 lg:p-8">
-        <div className="flex flex-col lg:flex-row gap-5">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px] mx-auto">
+        <div className="flex flex-col xl:flex-row gap-6 xl:gap-8">
 
-          {/* Calendar */}
-          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden lg:w-[420px] shrink-0">
+          {/* Calendar — larger on wide screens */}
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm overflow-hidden w-full xl:w-[min(100%,36rem)] xl:shrink-0">
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
               <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
               <div className="text-center">
-                <p className="text-sm font-bold text-slate-800">
+                <p className="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100">
                   {MONTHS[viewMonth.getMonth()]} {viewMonth.getFullYear()}
                 </p>
-                <p className="text-xs text-slate-400">{leads.length} appointment{leads.length !== 1 ? 's' : ''} total</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500">{leads.length} appointment{leads.length !== 1 ? 's' : ''} total</p>
               </div>
               <button onClick={nextMonth} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -170,16 +171,16 @@ export default function AppointmentsPage() {
             </div>
 
             {/* Day labels */}
-            <div className="grid grid-cols-7 border-b border-slate-100">
+            <div className="grid grid-cols-7 border-b border-slate-100 dark:border-slate-700">
               {DAYS.map(d => (
-                <div key={d} className="py-2 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                <div key={d} className="py-2.5 sm:py-3 text-center text-[10px] sm:text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide">
                   {d}
                 </div>
               ))}
             </div>
 
             {/* Grid */}
-            <div className="grid grid-cols-7 p-2 gap-1">
+            <div className="grid grid-cols-7 p-2 sm:p-3 gap-1 sm:gap-1.5">
               {calDays.map((date, i) => {
                 if (!date) return <div key={i} />;
                 const key = date.toDateString();
@@ -196,7 +197,7 @@ export default function AppointmentsPage() {
                       setSelectedDate(date);
                       setSelectedLead(null);
                     }}
-                    className={`relative flex flex-col items-center justify-start pt-1.5 pb-2 rounded-xl h-12 transition-all text-sm font-medium
+                    className={`relative flex flex-col items-center justify-start pt-2 pb-2.5 rounded-xl min-h-[3rem] sm:min-h-[3.5rem] transition-all text-sm sm:text-base font-medium
                       ${isSelected
                         ? 'bg-teal-500 text-white shadow-md shadow-teal-200'
                         : isToday
@@ -330,12 +331,12 @@ export default function AppointmentsPage() {
                               </div>
                             </div>
                           )}
-                          <a
+                          <Link
                             href={`/leads/${appt.id}`}
-                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-600 hover:text-teal-700 transition-colors"
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 transition-colors"
                           >
                             View Full Lead Profile →
-                          </a>
+                          </Link>
                         </div>
                       )}
                     </div>

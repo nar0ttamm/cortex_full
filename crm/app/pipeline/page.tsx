@@ -201,7 +201,13 @@ export default function PipelinePage() {
                             {lead.name?.charAt(0)?.toUpperCase() || '?'}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{lead.name}</p>
+                            <Link
+                              href={`/leads/${lead.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate block hover:text-teal-600 dark:hover:text-teal-400 transition-colors"
+                            >
+                              {lead.name}
+                            </Link>
                             <p className="text-[10px] text-slate-400">{lead.phone}</p>
                           </div>
                         </div>

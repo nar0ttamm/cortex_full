@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { AppShell } from '../components/AppShell';
 
@@ -8,6 +8,14 @@ export default function DataManagementPage() {
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showManualForm, setShowManualForm] = useState(false);
+  const [leadCount, setLeadCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch('/api/crm-data?action=leads')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setLeadCount(Array.isArray(d?.leads) ? d.leads.length : null))
+      .catch(() => setLeadCount(null));
+  }, []);
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
@@ -147,7 +155,12 @@ export default function DataManagementPage() {
               </svg>
             </div>
             <h2 className="text-sm font-bold text-slate-800 mb-1">Export Data</h2>
-            <p className="text-xs text-slate-500 mb-4">Download all leads as a CSV file</p>
+            <p className="text-xs text-slate-500 mb-2">Download all leads as a CSV file</p>
+            {leadCount !== null && (
+              <p className="text-[11px] font-medium text-teal-700 bg-teal-50 border border-teal-100 rounded-lg px-2.5 py-1.5 mb-3">
+                {leadCount} lead{leadCount !== 1 ? 's' : ''} will be included
+              </p>
+            )}
             <button onClick={handleExport} disabled={exporting} className="px-4 py-2 bg-teal-500 text-white rounded-xl text-xs font-semibold hover:bg-teal-600 disabled:opacity-50 transition-colors">
               {exporting ? 'Exporting...' : 'Export CSV'}
             </button>
