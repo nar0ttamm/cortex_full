@@ -109,7 +109,7 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
   - [ ] **Option A:** Carrier **media stream** (e.g. Telnyx WebSocket media) into `voice-service` (or sibling process).
   - [x] **Option B:** **FreeSWITCH** — `mod_audio_fork` WebSocket to `cortex_voice` audio ingress (see `GCP_SESSION_GUIDE.md`, `callMediaPipeline.ts`).
 - [ ] All audio assumptions **telephony-realistic**: **8 kHz** narrowband unless you have proven wideband end-to-end.
-- [ ] **Instrumentation:** log timestamps for **first STT partial**, **first LLM token**, **first TTS byte** per turn (even if rough).
+- [x] **Instrumentation:** log timestamps for **first STT final**, **first LLM chunk**, **TTS synthesize ms** per turn (`[metrics]` in `callMediaPipeline` / `voiceCallMetrics`).
 
 ### Checklist — connectivity
 
@@ -260,6 +260,7 @@ _Use one line per session or deploy: date, stage touched, what was ticked, link 
 | 2026-04-14 | 0 | Locked: outbound qualify (score) + callback/meeting; EN→HI/Hinglish; latency normal+tight; barge-in must; no recording; AMD in; no warm transfer; concurrency TBD; charter + “how % works” in doc. |
 | 2026-04-18 | 1–2 | OpenAI LLM on GCP VM (`LLM_PROVIDER=openai`); `/health` exposes `llm_provider` + `llm_model`; **`appointment_requested`** wired voice → backend → lead metadata → CRM lead detail hint; roadmap snapshot updated. |
 | 2026-04-19 | 2–3 | Post-call JSON **`proposed_appointment_iso`** → backend **`applyVoiceScheduledAppointment`** (CRM calendar fields); shorter default greeting + tunable **Deepgram endpointing**; prompt tuned for IST slot extraction. |
+| 2026-04-19 | 1 | TTS diagnostics: **`TTS_PROVIDER` must be `elevenlabs`** to use ElevenLabs voice; `/health` exposes TTS + warnings; ElevenLabs natural preset + lower streaming latency default; Stage 1 **metrics** for STT→LLM→TTS. |
 | | | |
 
 ---

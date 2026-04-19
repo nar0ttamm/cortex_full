@@ -41,6 +41,9 @@ interface Runtime {
   lastUserNorm: string;
   lastUserAt: number;
   turnIndex: number;
+  /** CHANNEL_ANSWER time — for Stage 1 latency metrics. */
+  answeredAtMs: number;
+  firstSttFinalLogged: boolean;
 }
 
 const pipelines = new Map<string, Runtime>();
@@ -87,7 +90,11 @@ async function speakText(callId: string, rt: Runtime, text: string, seqRef: { n:
   rt.blockSttAudio = true;
   const gen = rt.generation;
   try {
+    const ttsStart = Date.now();
     const pcm = await synthesizeTelephonyPcm8k(trimmed);
+    metricVoice(callId, 'tts_synthesize_ms', Date.now() - ttsStart, {
+      chars: trimmed.length,
+    });
     if (gen !== rt.generation) return;
     if (pcm.length < 320) {
       console.warn(`[pipeline:${callId}] TTS PCM very short (${pcm.length} bytes) — check TTS_PROVIDER and API keys`);
@@ -156,6 +163,7 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
 
   const seqRef = { n: 0 };
   const conversationHistory: Message[] = [];
+  const answeredAt = ctx.answeredAt ?? Date.now();
 
   const rt: Runtime = {
     ctx,
@@ -171,14 +179,18 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     lastUserNorm: '',
     lastUserAt: 0,
     turnIndex: 0,
+    answeredAtMs: answeredAt,
+    firstSttFinalLogged: false,
   };
-
-  const answeredAt = ctx.answeredAt ?? Date.now();
 
   const stt = speechRecognition.createStreamingSession({
     onTranscript: async (text: string, isFinal: boolean) => {
       if (rt.ended) return;
       if (!isFinal) return;
+      if (!rt.firstSttFinalLogged) {
+        rt.firstSttFinalLogged = true;
+        metricVoice(callId, 'answer_to_first_stt_final_ms', Date.now() - rt.answeredAtMs);
+      }
       const cleaned = text.trim();
       if (!cleaned) return;
       const norm = normalizeUtterance(cleaned);
@@ -207,7 +219,12 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
         });
 
         let responseText = '';
+        let firstLlmChunkLogged = false;
         await conversationEngine.streamResponse(rt.conversationHistory, async (chunk: string) => {
+          if (!firstLlmChunkLogged && chunk.trim()) {
+            firstLlmChunkLogged = true;
+            metricVoice(callId, 'stt_final_to_first_llm_chunk_ms', Date.now() - turnStart, { turn: turnN });
+          }
           responseText += chunk;
           await speakText(callId, rt, chunk, seqRef);
         });

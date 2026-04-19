@@ -6,6 +6,7 @@ import { callController } from './callController';
 import { attachAudioIngressWss } from './audioIngressServer';
 import { initEslVoiceHooks } from './eslVoiceHooks';
 import { getLlmRuntimeSummary } from './conversationEngine';
+import { getTtsRuntimeSummary, logTtsStartupHints } from './voiceSynthesis';
 
 const app = express();
 app.use(express.json());
@@ -17,12 +18,26 @@ app.post('/voice/call-result', callController.callResult);
 
 app.get('/health', (_req, res) => {
   const llm = getLlmRuntimeSummary();
+  const tts = getTtsRuntimeSummary();
   res.json({
     status: 'ok',
     service: 'cortex_voice',
     timestamp: new Date().toISOString(),
     llm_provider: llm.provider,
     llm_model: llm.model,
+    tts_provider: tts.provider_effective,
+    tts_requested: tts.provider_requested,
+    ...(tts.deepgram_model ? { deepgram_tts_model: tts.deepgram_model } : {}),
+    ...(tts.elevenlabs
+      ? {
+          elevenlabs_model: tts.elevenlabs.model,
+          elevenlabs_voice_id_suffix: tts.elevenlabs.voice_id_suffix,
+          elevenlabs_streaming_latency: tts.elevenlabs.streaming_latency,
+          elevenlabs_natural_preset: tts.elevenlabs.natural_preset,
+          elevenlabs_configured: tts.elevenlabs.configured,
+        }
+      : {}),
+    tts_warnings: tts.warnings,
   });
 });
 
@@ -33,12 +48,21 @@ attachAudioIngressWss(server);
 
 server.listen(PORT, HOST, () => {
   const llm = getLlmRuntimeSummary();
+  const tts = getTtsRuntimeSummary();
   console.log(`cortex_voice listening on http://${HOST}:${PORT}`);
   console.log(`[cortex_voice] LLM: ${llm.provider} (${llm.model})`);
-  const tts = process.env.VOICE_TTS_TMP_DIR?.trim();
-  if (tts) {
+  console.log(
+    `[cortex_voice] TTS: ${tts.provider_effective}` +
+      (tts.provider_effective === 'deepgram' ? ` (model=${tts.deepgram_model})` : '') +
+      (tts.elevenlabs
+        ? ` model=${tts.elevenlabs.model} voice=…${tts.elevenlabs.voice_id_suffix} latency=${tts.elevenlabs.streaming_latency}`
+        : '')
+  );
+  logTtsStartupHints();
+  const ttsTmpDir = process.env.VOICE_TTS_TMP_DIR?.trim();
+  if (ttsTmpDir) {
     console.log(
-      `[cortex_voice] VOICE_TTS_TMP_DIR=${tts} — uuid_broadcast uses these WAV paths; mount this dir into FreeSWITCH if FS is Docker.`
+      `[cortex_voice] VOICE_TTS_TMP_DIR=${ttsTmpDir} — uuid_broadcast uses these WAV paths; mount this dir into FreeSWITCH if FS is Docker.`
     );
   } else {
     console.log(

@@ -99,9 +99,11 @@ Central trimmed env: `DATABASE_URL`, `ENCRYPTION_KEY`, `CALLING_MODE`, `CALL_DEL
 - **Firewall:** e.g. rule **`voice-api`**: **TCP 5000** from `0.0.0.0/0` to instances with matching **network tag**
 - **Supabase on VM:** Use **Session pooler** URI (e.g. `aws-*-*.pooler.supabase.com:5432`) — **direct `db.<ref>.supabase.co`** often has **no IPv4 A record** from the VM
 
-### 3.4 Operational limits (current stage)
+### 3.4 Stage 1 — voice / TTS (operational notes)
 
-- **Live ESL path:** Outbound **originate + park**; **conversational audio** (RTP ↔ STT/LLM/TTS) **not** wired on the live call leg
+- **Latency metrics** (grep `pm2 logs cortex_voice | grep '\[metrics\]'`): `answer_to_first_stt_final_ms`, `stt_final_to_first_llm_chunk_ms`, `tts_synthesize_ms`, `answer_to_greeting_done`, etc.
+- **TTS sounds “generic” despite ElevenLabs:** **`TTS_PROVIDER` defaults to `deepgram`** (Aura `aura-asteria-en`). You must set **`TTS_PROVIDER=elevenlabs`** plus **`ELEVENLABS_API_KEY`** and **`ELEVENLABS_VOICE_ID`** on the VM. **`GET /health`** returns `tts_provider`, `tts_requested`, and `tts_warnings` so misconfiguration is obvious.
+- **ElevenLabs quality:** Default **`ELEVENLABS_STREAM_LATENCY=1`** (was 3) and optional **`ELEVENLABS_NATURAL_PRESET=true`** voice settings reduce “flat” speech; tune **`ELEVENLABS_MODEL`** (e.g. `eleven_multilingual_v2`) if turbo sounds too synthetic.
 - **Backend → voice:** **`fetch`** to **`/voice/start-call`** with **~25s** abort in `newCalls.js`
 
 ### 3.5 Example & gateway config

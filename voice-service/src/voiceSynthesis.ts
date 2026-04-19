@@ -3,12 +3,99 @@ import http from 'http';
 import { synthesizeElevenLabsToPcm16 } from './elevenLabsTts';
 import { downsamplePcm16Mono16kTo8k } from './wavUtil';
 
+/** Deepgram Aura model used when TTS_PROVIDER=deepgram (not your ElevenLabs voice). */
+export const DEEPGRAM_TTS_MODEL = 'aura-asteria-en';
+
 /**
  * Voice synthesis (Text-to-Speech).
  *
  * Providers: deepgram | google | elevenlabs
  * Returns PCM16 mono at **8000 Hz** for telephony WAV / uuid_broadcast.
+ *
+ * Important: ElevenLabs env vars are ignored unless **TTS_PROVIDER=elevenlabs**.
  */
+
+export type TtsEffectiveProvider = 'deepgram' | 'google' | 'elevenlabs';
+
+export interface TtsRuntimeSummary {
+  provider_requested: string;
+  provider_effective: TtsEffectiveProvider;
+  /** Deepgram Aura voice model id (fixed in this build). */
+  deepgram_model?: string;
+  elevenlabs?: {
+    model: string;
+    voice_id_suffix: string;
+    streaming_latency: string;
+    natural_preset: boolean;
+    configured: boolean;
+  };
+  /** Misconfiguration hints (e.g. ElevenLabs ID set but provider still deepgram). */
+  warnings: string[];
+}
+
+function collectTtsWarnings(): string[] {
+  const w: string[] = [];
+  const req = (process.env.TTS_PROVIDER || 'deepgram').trim().toLowerCase();
+  const hasElId = Boolean((process.env.ELEVENLABS_VOICE_ID || '').trim());
+  const hasElKey = Boolean((process.env.ELEVENLABS_API_KEY || '').trim());
+  if (req !== 'elevenlabs' && (hasElId || hasElKey)) {
+    w.push(
+      'ElevenLabs env vars are set but TTS_PROVIDER is not elevenlabs — audio still uses Deepgram Aura. Set TTS_PROVIDER=elevenlabs (and keep ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID).'
+    );
+  }
+  if (req === 'elevenlabs') {
+    if (!hasElKey) w.push('TTS_PROVIDER=elevenlabs but ELEVENLABS_API_KEY is missing — TTS will error at runtime');
+    if (!hasElId) w.push('TTS_PROVIDER=elevenlabs but ELEVENLABS_VOICE_ID is missing — TTS will error at runtime');
+  }
+  return w;
+}
+
+/** For /health and startup logs — does not call vendor APIs. */
+export function getTtsRuntimeSummary(): TtsRuntimeSummary {
+  const req = (process.env.TTS_PROVIDER || 'deepgram').trim().toLowerCase();
+  const warnings = collectTtsWarnings();
+  const hasEl = Boolean((process.env.ELEVENLABS_API_KEY || '').trim() && (process.env.ELEVENLABS_VOICE_ID || '').trim());
+
+  if (req === 'google') {
+    return { provider_requested: req, provider_effective: 'google', warnings };
+  }
+  if (req === 'elevenlabs') {
+    const vid = (process.env.ELEVENLABS_VOICE_ID || '').trim();
+    const suffix = vid.length >= 4 ? vid.slice(-4) : vid || '—';
+    const natural =
+      (process.env.ELEVENLABS_NATURAL_PRESET || 'true').trim().toLowerCase() !== 'false' &&
+      (process.env.ELEVENLABS_NATURAL_PRESET || 'true').trim() !== '0';
+    return {
+      provider_requested: req,
+      provider_effective: 'elevenlabs',
+      elevenlabs: {
+        model: (process.env.ELEVENLABS_MODEL || 'eleven_turbo_v2_5').trim(),
+        voice_id_suffix: suffix,
+        streaming_latency: (process.env.ELEVENLABS_STREAM_LATENCY || '1').trim(),
+        natural_preset: natural,
+        configured: hasEl,
+      },
+      warnings,
+    };
+  }
+
+  return {
+    provider_requested: req || 'deepgram',
+    provider_effective: 'deepgram',
+    deepgram_model: DEEPGRAM_TTS_MODEL,
+    warnings,
+  };
+}
+
+let ttsWarningsLogged = false;
+export function logTtsStartupHints(): void {
+  if (ttsWarningsLogged) return;
+  ttsWarningsLogged = true;
+  const s = getTtsRuntimeSummary();
+  for (const line of s.warnings) {
+    console.warn(`[cortex_voice TTS] ${line}`);
+  }
+}
 
 export const voiceSynthesis = {
   async synthesize(text: string): Promise<Buffer> {
@@ -38,7 +125,7 @@ async function synthesizeDeepgram(text: string): Promise<Buffer> {
     const body = JSON.stringify({ text });
     const options = {
       hostname: 'api.deepgram.com',
-      path: '/v1/speak?model=aura-asteria-en&encoding=linear16&sample_rate=8000',
+      path: `/v1/speak?model=${DEEPGRAM_TTS_MODEL}&encoding=linear16&sample_rate=8000`,
       method: 'POST',
       headers: {
         'Authorization': `Token ${apiKey}`,

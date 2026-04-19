@@ -15,17 +15,36 @@ function getModelId(): string {
   return (process.env.ELEVENLABS_MODEL || 'eleven_turbo_v2_5').trim();
 }
 
+/** When no per-env overrides: slightly more expressive than EL “neutral” API defaults (less flat / robotic). */
+function naturalPresetVoiceSettings(): Record<string, number | boolean> {
+  return {
+    stability: 0.42,
+    similarity_boost: 0.78,
+    style: 0.28,
+    use_speaker_boost: true,
+  };
+}
+
 function optionalVoiceSettings(): Record<string, number | boolean> | undefined {
   const stability = process.env.ELEVENLABS_STABILITY;
   const similarity = process.env.ELEVENLABS_SIMILARITY;
   const style = process.env.ELEVENLABS_STYLE;
   const speakerBoost = process.env.ELEVENLABS_SPEAKER_BOOST;
-  if (!stability && !similarity && !style && !speakerBoost) return undefined;
+  const explicitAny = Boolean(stability || similarity || style || speakerBoost);
+  const presetOff =
+    (process.env.ELEVENLABS_NATURAL_PRESET || 'true').trim().toLowerCase() === 'false' ||
+    (process.env.ELEVENLABS_NATURAL_PRESET || '').trim() === '0';
+
   const out: Record<string, number | boolean> = {};
-  if (stability) out.stability = Math.min(1, Math.max(0, parseFloat(stability)));
-  if (similarity) out.similarity_boost = Math.min(1, Math.max(0, parseFloat(similarity)));
-  if (style) out.style = Math.min(1, Math.max(0, parseFloat(style)));
-  if (speakerBoost) out.use_speaker_boost = speakerBoost === 'true' || speakerBoost === '1';
+  if (explicitAny) {
+    if (!presetOff) Object.assign(out, naturalPresetVoiceSettings());
+    if (stability) out.stability = Math.min(1, Math.max(0, parseFloat(stability)));
+    if (similarity) out.similarity_boost = Math.min(1, Math.max(0, parseFloat(similarity)));
+    if (style) out.style = Math.min(1, Math.max(0, parseFloat(style)));
+    if (speakerBoost) out.use_speaker_boost = speakerBoost === 'true' || speakerBoost === '1';
+  } else if (!presetOff) {
+    Object.assign(out, naturalPresetVoiceSettings());
+  }
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -35,7 +54,8 @@ export async function synthesizeElevenLabsToPcm16(text: string): Promise<{ pcm: 
 
   const voiceId = getVoiceId();
   const outputFormat = (process.env.ELEVENLABS_OUTPUT_FORMAT || 'pcm_16000').trim();
-  const latency = (process.env.ELEVENLABS_STREAM_LATENCY || '3').trim();
+  /** 0–4; lower = higher quality / less aggressive streaming optimization (was default 3, sounded flatter on some voices). */
+  const latency = (process.env.ELEVENLABS_STREAM_LATENCY || '1').trim();
   const path =
     `/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream` +
     `?output_format=${encodeURIComponent(outputFormat)}&optimize_streaming_latency=${encodeURIComponent(latency)}`;
