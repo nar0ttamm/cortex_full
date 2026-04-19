@@ -102,7 +102,7 @@ Central trimmed env: `DATABASE_URL`, `ENCRYPTION_KEY`, `CALLING_MODE`, `CALL_DEL
 ### 3.4 Stage 1 — voice / TTS (operational notes)
 
 - **Latency metrics** (grep `pm2 logs cortex_voice | grep '\[metrics\]'`): `answer_to_first_stt_final_ms`, `stt_final_to_first_llm_chunk_ms`, `tts_synthesize_ms`, `answer_to_greeting_done`, etc.
-- **TTS sounds “generic” despite ElevenLabs:** **`TTS_PROVIDER` defaults to `deepgram`** (Aura `aura-asteria-en`). You must set **`TTS_PROVIDER=elevenlabs`** plus **`ELEVENLABS_API_KEY`** and **`ELEVENLABS_VOICE_ID`** on the VM. **`GET /health`** returns `tts_provider`, `tts_requested`, and `tts_warnings` so misconfiguration is obvious.
+- **TTS (Deepgram default):** voice is **`DEEPGRAM_TTS_MODEL`** (default **`aura-2-harmonia-en`**). ElevenLabs only when **`TTS_PROVIDER=elevenlabs`** plus keys. **`GET /health`** returns `tts_provider`, `deepgram_tts_model`, and `tts_warnings`.
 - **ElevenLabs quality:** Default **`ELEVENLABS_STREAM_LATENCY=1`** (was 3) and optional **`ELEVENLABS_NATURAL_PRESET=true`** voice settings reduce “flat” speech; tune **`ELEVENLABS_MODEL`** (e.g. `eleven_multilingual_v2`) if turbo sounds too synthetic.
 - **Backend → voice:** **`fetch`** to **`/voice/start-call`** with **~25s** abort in `newCalls.js`
 

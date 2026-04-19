@@ -3,8 +3,14 @@ import http from 'http';
 import { synthesizeElevenLabsToPcm16 } from './elevenLabsTts';
 import { downsamplePcm16Mono16kTo8k } from './wavUtil';
 
-/** Deepgram Aura model used when TTS_PROVIDER=deepgram (not your ElevenLabs voice). */
-export const DEEPGRAM_TTS_MODEL = 'aura-asteria-en';
+/** Default Aura-2 voice when `DEEPGRAM_TTS_MODEL` is unset (`TTS_PROVIDER=deepgram`). */
+export const DEFAULT_DEEPGRAM_TTS_MODEL = 'aura-2-harmonia-en';
+
+/** Resolved Deepgram TTS model id (Aura / Aura-2). See https://developers.deepgram.com/docs/tts-models */
+export function getDeepgramTtsModel(): string {
+  const m = (process.env.DEEPGRAM_TTS_MODEL || DEFAULT_DEEPGRAM_TTS_MODEL).trim();
+  return m || DEFAULT_DEEPGRAM_TTS_MODEL;
+}
 
 /**
  * Voice synthesis (Text-to-Speech).
@@ -20,7 +26,7 @@ export type TtsEffectiveProvider = 'deepgram' | 'google' | 'elevenlabs';
 export interface TtsRuntimeSummary {
   provider_requested: string;
   provider_effective: TtsEffectiveProvider;
-  /** Deepgram Aura voice model id (fixed in this build). */
+  /** Deepgram Aura / Aura-2 voice (`DEEPGRAM_TTS_MODEL`). */
   deepgram_model?: string;
   elevenlabs?: {
     model: string;
@@ -82,7 +88,7 @@ export function getTtsRuntimeSummary(): TtsRuntimeSummary {
   return {
     provider_requested: req || 'deepgram',
     provider_effective: 'deepgram',
-    deepgram_model: DEEPGRAM_TTS_MODEL,
+    deepgram_model: getDeepgramTtsModel(),
     warnings,
   };
 }
@@ -122,10 +128,11 @@ async function synthesizeDeepgram(text: string): Promise<Buffer> {
   if (!apiKey) throw new Error('DEEPGRAM_API_KEY not configured');
 
   return new Promise((resolve, reject) => {
+    const model = encodeURIComponent(getDeepgramTtsModel());
     const body = JSON.stringify({ text });
     const options = {
       hostname: 'api.deepgram.com',
-      path: `/v1/speak?model=${DEEPGRAM_TTS_MODEL}&encoding=linear16&sample_rate=8000`,
+      path: `/v1/speak?model=${model}&encoding=linear16&sample_rate=8000`,
       method: 'POST',
       headers: {
         'Authorization': `Token ${apiKey}`,
