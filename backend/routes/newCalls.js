@@ -62,7 +62,12 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
-      return res.status(502).json({ error: 'Voice service error', details: err });
+      const upstream = err && typeof err.error === 'string' ? err.error : '';
+      const hint =
+        upstream === 'Unauthorized'
+          ? 'Voice service rejected the request (VOICE_SECRET must match on Vercel backend and voice VM).'
+          : 'Voice service error';
+      return res.status(502).json({ error: hint, details: err });
     }
 
     const result = await response.json();

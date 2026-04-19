@@ -51,11 +51,15 @@ export async function startAiCall(tenantId: string, leadId: string): Promise<{ c
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg =
-      data.error ||
-      data.details?.error ||
-      (typeof data.details === 'string' ? data.details : null) ||
-      `HTTP ${res.status}`;
+    const details = data.details as { error?: string } | string | undefined;
+    const detailMsg =
+      typeof details === 'string'
+        ? details
+        : details && typeof details.error === 'string'
+          ? details.error
+          : null;
+    // Prefer voice VM / upstream detail (e.g. Unauthorized) over generic backend wrapper text.
+    const msg = detailMsg || data.error || `HTTP ${res.status}`;
     throw new Error(msg);
   }
   return data;
