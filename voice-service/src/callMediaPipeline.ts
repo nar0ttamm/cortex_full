@@ -95,7 +95,12 @@ async function speakText(callId: string, rt: Runtime, text: string, seqRef: { n:
     metricVoice(callId, 'tts_synthesize_ms', Date.now() - ttsStart, {
       chars: trimmed.length,
     });
-    if (gen !== rt.generation) return;
+    if (gen !== rt.generation) {
+      console.warn(
+        `[pipeline:${callId}] skipping uuid_broadcast — generation changed mid-TTS (stale chunk after barge-in/VAD); gen=${gen} now=${rt.generation}`
+      );
+      return;
+    }
     if (pcm.length < 320) {
       console.warn(`[pipeline:${callId}] TTS PCM very short (${pcm.length} bytes) — check TTS_PROVIDER and API keys`);
     }
@@ -255,8 +260,11 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     },
     onSpeechStart: () => {
       if (rt.ended) return;
+      // While TTS is active we gate forked PCM away from Deepgram — but Deepgram can still emit
+      // SpeechStarted (e.g. connect/noise). Do not bump generation or uuid_break here or the next
+      // uuid_broadcast is skipped (gen mismatch) → silent greeting / silent replies.
+      if (rt.blockSttAudio) return;
       rt.generation += 1;
-      rt.blockSttAudio = false;
       rt.sttGateUntil = 0;
       void uuidBreak(callId).catch(() => {});
       rt.aiSpeaking = false;
