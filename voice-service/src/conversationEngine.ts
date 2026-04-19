@@ -30,13 +30,36 @@ Your role is to:
 When the prospect wants to schedule: confirm date AND time in plain words (e.g. "tomorrow twelve noon IST"), then say they'll see it on the CRM calendar.
 Default to Indian English / Hinglish if they mix languages.
 When not interested: thank them politely and end the call graciously.
+If they say thanks or goodbye, reply once briefly— the call may hang up automatically after your sign-off.
 
 IMPORTANT: Keep each response under 35 words for low latency voice output. No markdown or bullet lists—spoken words only.`;
 
 const END_SIGNALS = [
-  'goodbye', 'bye', 'not interested', "i'll think about it", 'call me later',
-  'no thank you', 'not now', 'have a good day', 'talk to you later',
+  'goodbye',
+  'bye',
+  'not interested',
+  "i'll think about it",
+  'call me later',
+  'no thank you',
+  'not now',
+  'have a good day',
+  'talk to you later',
+  'thank you for your time',
+  'thanks for your time',
+  "you're welcome",
+  'take care',
 ];
+
+/** User said the conversation is over (short farewell) — skip another LLM turn and sign off + hang up. */
+const USER_FAREWELL_RE = new RegExp(
+  [
+    '^\\s*(thank you|thanks|thankyou)[,!\\.\\s]*$',
+    '^\\s*(ok|okay|alright),?\\s+(thank you|thanks|bye)\\b',
+    '\\b(bye|goodbye|talk to you later|have a good (day|one))\\b',
+    '^\\s*(namaste|chalo|chaliye)\\b.*\\b(bye|thanks)',
+  ].join('|'),
+  'i'
+);
 
 /** True when OpenAI is configured. */
 export function hasLlmConfigured(): boolean {
@@ -75,6 +98,24 @@ function buildOpenAiMessages(history: Message[]): OpenAI.Chat.Completions.ChatCo
   return out;
 }
 
+/** Emit first complete sentence ASAP (`. ` / `? ` / `! `) for lower time-to-first-TTS. */
+function takeFirstSentence(buf: string): { sentence: string; rest: string } | null {
+  let bestIdx = -1;
+  let bestSepLen = 2;
+  for (const sep of ['. ', '? ', '! ']) {
+    const i = buf.indexOf(sep);
+    if (i >= 0 && (bestIdx < 0 || i < bestIdx)) {
+      bestIdx = i;
+      bestSepLen = sep.length;
+    }
+  }
+  if (bestIdx < 0) return null;
+  return {
+    sentence: buf.slice(0, bestIdx + 1).trim(),
+    rest: buf.slice(bestIdx + bestSepLen),
+  };
+}
+
 async function streamOpenAi(
   history: Message[],
   onChunk: (chunk: string) => Promise<void>
@@ -100,11 +141,10 @@ async function streamOpenAi(
     buffer += text;
     fullResponse += text;
 
-    const sentenceEnd = buffer.lastIndexOf('. ');
-    if (sentenceEnd > 0) {
-      const sentence = buffer.slice(0, sentenceEnd + 1).trim();
-      if (sentence) await onChunk(sentence);
-      buffer = buffer.slice(sentenceEnd + 2);
+    let chunk: { sentence: string; rest: string } | null;
+    while ((chunk = takeFirstSentence(buffer))) {
+      buffer = chunk.rest;
+      if (chunk.sentence) await onChunk(chunk.sentence);
     }
   }
 
@@ -133,6 +173,20 @@ export const conversationEngine = {
   shouldEndCall(responseText: string): boolean {
     const lower = responseText.toLowerCase();
     return END_SIGNALS.some(signal => lower.includes(signal));
+  },
+
+  /** Caller is clearly closing (thanks / bye) — use after ≥1 full exchange so we don’t eat “not interested”. */
+  userSignalsCallEnd(userText: string): boolean {
+    const t = userText.trim();
+    if (t.length > 120) return false;
+    const lower = t.toLowerCase();
+    if (
+      /^(no thanks?|not interested|don'?t call|stop calling|remove me)/i.test(t) &&
+      !/\b(bye|goodbye|thank)/i.test(t)
+    ) {
+      return false;
+    }
+    return USER_FAREWELL_RE.test(lower);
   },
 
   async summarizeCall(history: Message[]): Promise<CallSummary> {

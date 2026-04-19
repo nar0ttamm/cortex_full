@@ -24,7 +24,7 @@ function wireEslEvents(conn: Awaited<ReturnType<typeof getEslConnectionUnsafe>>)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   conn.on('esl::event::CHANNEL_HANGUP_COMPLETE::*', (evt: any) => {
     const uuid = evt.getHeader?.('Unique-ID');
-    if (uuid) freeswitchBridge.onChannelHangupComplete(uuid);
+    if (uuid) freeswitchBridge.onChannelHangupComplete(uuid, evt);
   });
 }
 

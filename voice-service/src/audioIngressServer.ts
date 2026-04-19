@@ -10,6 +10,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 const PCM16_MONO_16K_BPS = 16000 * 2;
 
 const consumers = new Map<string, (buf: Buffer) => void>();
+let warnedOpenIngress = false;
 
 export function registerAudioConsumer(callId: string, onPcm: (buf: Buffer) => void): () => void {
   consumers.set(callId, onPcm);
@@ -117,7 +118,8 @@ export function attachAudioIngressWss(server: HttpServer): void {
       socket.destroy();
       return;
     }
-    if (!secret) {
+    if (!secret && !warnedOpenIngress) {
+      warnedOpenIngress = true;
       console.warn('[audio-in] AUDIO_INGRESS_SECRET and VOICE_SECRET are empty — ingress is open (dev only)');
     }
 

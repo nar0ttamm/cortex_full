@@ -6,6 +6,8 @@ import { callStorage } from './callStorage';
 import { originatePark, uuidKill } from './eslClient';
 import { normalizeToE164 } from './phoneE164';
 import { beginEslCallPipeline, stopEslCallPipeline } from './callMediaPipeline';
+import { mapEarlyHangupCause } from './sipHangupCause';
+import { notifyBackendCallResult } from './backendNotify';
 
 /**
  * FreeSWITCH ESL bridge: real outbound calls via Telnyx gateway when USE_ESL_ORIGINATE is enabled.
@@ -77,6 +79,7 @@ class FreeswitchBridge extends EventEmitter {
         callScript,
         startTime: Date.now(),
         esl: true,
+        answered: false,
       });
       return;
     }
@@ -118,6 +121,7 @@ class FreeswitchBridge extends EventEmitter {
   onChannelAnswer(callUuid: string): void {
     const ctx = this.activeCalls.get(callUuid);
     if (!ctx?.esl) return;
+    ctx.answered = true;
     void beginEslCallPipeline(callUuid, {
       tenant_id: ctx.tenant_id,
       lead_id: ctx.lead_id,
@@ -132,9 +136,54 @@ class FreeswitchBridge extends EventEmitter {
   }
 
   /** ESL `CHANNEL_HANGUP_COMPLETE` — tear down media pipeline and drop session map entry. */
-  onChannelHangupComplete(callUuid: string): void {
+  onChannelHangupComplete(callUuid: string, evt?: unknown): void {
+    const ctx = this.activeCalls.get(callUuid);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const e = evt as any;
+    const cause = String(e?.getHeader?.('Hangup-Cause') || e?.getHeader?.('hangup_cause') || '').trim();
+
+    if (ctx?.esl && ctx.answered === false) {
+      void this.handleNeverAnsweredHangup(callUuid, ctx, cause);
+    }
+
     void stopEslCallPipeline(callUuid, 'hangup').catch(() => {});
     this.activeCalls.delete(callUuid);
+  }
+
+  /** Call ended before CHANNEL_ANSWER (busy, no answer, etc.) — CRM still needs a row + lead update. */
+  private async handleNeverAnsweredHangup(
+    callId: string,
+    ctx: { tenant_id: string; lead_id: string },
+    causeRaw: string
+  ): Promise<void> {
+    const { outcome, summary } = mapEarlyHangupCause(causeRaw);
+    try {
+      await callStorage.updateCallStatus(callId, 'failed', causeRaw || outcome);
+      await callStorage.saveCallResult({
+        call_id: callId,
+        transcript: '',
+        summary,
+        duration_seconds: 0,
+        outcome,
+        appointment_requested: false,
+        proposed_appointment_iso: null,
+      });
+      await callStorage.logEvent(callId, 'early_hangup', { cause: causeRaw, outcome });
+      await notifyBackendCallResult({
+        tenant_id: ctx.tenant_id,
+        lead_id: ctx.lead_id,
+        call_id: callId,
+        outcome,
+        summary,
+        transcript: '',
+        duration_seconds: 0,
+        appointment_requested: false,
+        proposed_appointment_iso: null,
+      });
+      console.log(`[FreeSWITCH] early hangup ${callId} cause=${causeRaw || '∅'} → outcome=${outcome}`);
+    } catch (err: unknown) {
+      console.error('[FreeSWITCH] handleNeverAnsweredHangup', err instanceof Error ? err.message : err);
+    }
   }
 
   private async _startConversationPipeline(callId: string): Promise<void> {

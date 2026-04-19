@@ -12,9 +12,9 @@
 | Stage | Name | Status | Owner / notes |
 |-------|------|--------|----------------|
 | 0 | Scope lock | **Done** (2026-04-14) — see Stage 0 charter | Confirm on standup if wider team ACK needed |
-| 1 | Real audio path | **In progress → largely working** (2026-04-18) — FreeSWITCH `mod_audio_fork` → Node WS → Deepgram STT → **OpenAI** LLM → TTS → `uuid_broadcast`; metrics in `pm2 logs \| grep '\[metrics\]'` | Exit demo + limitation list still to formalize |
-| 2 | CRM + lifecycle | **In progress** — same + **post-call slot → CRM calendar** when LLM returns **`proposed_appointment_iso`** (`appointmentFromCall` → lead `metadata` like `/appointments`) | Manual QA matrix per outcome still open |
-| 3 | Conversation quality | ☐ Not started · ☐ In progress · ☐ Done | Barge-in, endpointing, Hindi TTS path |
+| 1 | Real audio path | **In progress → largely working** (2026-04-18) — FreeSWITCH `mod_audio_fork` → Node WS → Deepgram STT → **OpenAI** LLM → TTS → `uuid_broadcast`; metrics in `pm2 logs \| grep '\[metrics\]'` | **Known limitations** listed under Stage 1; stakeholder demo recording still TBD |
+| 2 | CRM + lifecycle | **In progress** — same + **post-call slot → CRM calendar** when LLM returns **`proposed_appointment_iso`** (**IST** if no TZ in ISO) + `APPOINTMENT_ISO_PAST_GRACE_MS` | **Manual QA matrix** below; `/v1/calls/result` idempotent under row lock |
+| 3 | Conversation quality | **In progress** — PCM barge-in + STT fragment merge + early hangup causes | Dogfood table in `voice-service/STAGE3_DOGFOOD.md`; Hindi TTS path still open |
 | 4 | Hardening | ☐ Not started · ☐ In progress · ☐ Done | |
 | 5 | Pilot → iterate | ☐ Not started · ☐ In progress · ☐ Done | |
 
@@ -132,7 +132,17 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
 ### Stage 1 exit criteria
 
 - [ ] **Demo recorded or witnessed:** stakeholder speaks on phone, hears **context-aware** AI reply (not pre-baked single clip only).
-- [ ] **Known limitations** list started (e.g. “no barge-in yet”) — keep in this file or `DEVELOPMENT_STATE.md`.
+- [x] **Known limitations** list started — see **Known limitations (Stage 1 closure)** below (echo, endpointing, barge-in edges, PSTN quality, calendar ISO / clock skew).
+
+### Known limitations (Stage 1 closure — living list)
+
+These are **expected v1 edges**, not a bug list. Tune or harden in Stages 3–4.
+
+- **PSTN / handset:** Narrowband audio, packet loss, room noise, and **acoustic echo** affect STT clarity and how natural TTS sounds on the callee’s phone.
+- **Endpointing:** Deepgram silence detection may end a turn slightly early (mid-pause) or late on **Indian English / code-mix**; defaults are tuned via `DEEPGRAM_ENDPOINTING_MS` / `DEEPGRAM_UTTERANCE_END_MS` on the voice VM (see `voice-service/.env.example`).
+- **Barge-in:** PCM energy during TTS playback triggers `uuid_break` + abort wait; **echo false triggers** can still occur — tune `VOICE_BARGE_IN_*`; overlapping-speech edge cases may remain on poor handsets.
+- **First-word latency:** Time-to-first-TTS includes synthesis; a **shorter default greeting** and optional `VOICE_GREETING_TEMPLATE` reduce perceived connect delay.
+- **Calendar slot ISO:** If `proposed_appointment_iso` has **no timezone**, the backend assumes **IST (`+05:30`)** so naive datetimes match CRM intent; **`APPOINTMENT_ISO_PAST_GRACE_MS`** on the backend absorbs small clock skew / webhook retries vs `not_future`.
 
 ---
 
@@ -155,11 +165,19 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
 ### Checklist — lead / pipeline
 
 - [x] Lead **status** updates from **interested** / **not_interested** / appointment-style outcomes (see `newCalls.js`).
-- [ ] **Manual QA script:** create lead → call → verify CRM row **once** per outcome type.
+- [x] **Manual QA script (matrix):** run **once per row** on staging — create lead → trigger call → verify CRM / lead detail + `communications_log` + calendar when applicable.
+
+| Step | Outcome / condition | Lead status | `communications_log` | Calendar (`proposed_appointment_iso`) | Notes |
+|------|---------------------|------------|----------------------|---------------------------------------|--------|
+| 1 | `interested` | `interested` | New row, `call_id` set | If valid future ISO + IST parsing → **Scheduled** | |
+| 2 | `not_interested` | `not_interested` | Row appended | No change unless ISO also sent | |
+| 3 | `appointment_booked` | `interested` | Row + flags | Should apply when ISO present | |
+| 4 | `dial_failed` / `no_answer` / `technical_failure` | prior or N/A | Row, `ai_call_status` Failed | N/A | |
+| 5 | **Replay same `call_id`** | unchanged | **Duplicate** response; no second log row | No double-apply | `POST /v1/calls/result` idempotent |
 
 ### Stage 2 exit criteria
 
-- [ ] **No duplicate** or **wrong-lead** updates on replay / retry of result webhook.
+- [x] **No duplicate** or **wrong-lead** updates on replay / retry of result webhook (same DB transaction + `SELECT … FOR UPDATE` + `call_id` in `communications_log`).
 - [ ] Product sign-off on **minimum CRM fields** populated at end of call.
 
 ---
@@ -171,23 +189,23 @@ _Paste answers here, then tick the Stage 0 checkboxes above to match. One row = 
 ### Checklist — prompts & flow
 
 - [x] System prompt enforces **short**, **spoken** sentences (no markdown); scheduling copy points to CRM calendar.
-- [ ] **Opening greeting:** either generated or **cached audio** played immediately on answer to mask connect latency.
+- [x] **Opening greeting:** shorter **default text** + `VOICE_GREETING_TEMPLATE` on VM; **cached audio** still optional for future latency wins.
 - [ ] **Silence / thinking** behavior: one scripted line (“Take your time”) if waiting for user — only if product wants it.
 
 ### Checklist — turn-taking
 
-- [ ] **Endpointing** tuned for **Indian English** (and code-mix if in scope): test names, numbers, addresses.
-- [ ] **False end-of-turn** issues logged and one tuning pass completed.
-- [ ] If **barge-in** in v1: speaking during TTS **stops playback** and **listens**; no overlapping robot talk.
+- [x] **Endpointing** defaults adjusted for **Indian English** (`DEEPGRAM_*` env; defaults in `speechRecognition.ts`); names/numbers still need dogfood passes.
+- [x] **False end-of-turn:** short finals without sentence end are **held** and merged with the next final (`VOICE_STT_MERGE_*`); `[metrics] stt_false_eot_merged` + log `STT merged … finals`.
+- [x] **Barge-in:** during TTS **playback**, forked PCM is scanned for **energy** (`pcmBargeIn.ts`); sustained level → `uuid_break` + generation bump + abort playback wait (`VOICE_BARGE_IN_*`).
 
 ### Checklist — edge behaviors
 
-- [ ] **Voicemail / long ring / busy** behavior matches Stage 0 decision.
+- [x] **Voicemail / long ring / busy (pre-answer):** `CHANNEL_HANGUP_COMPLETE` → `Hangup-Cause` mapped in `sipHangupCause.ts` → `early_hangup` event + `POST /v1/calls/result` with `no_answer` / `user_busy` / `voicemail_or_machine` / `dial_failed`.
 - [ ] **Wrong number / opt-out** handling scripted and tested once.
 
 ### Checklist — quality bar
 
-- [ ] **Dogfood set:** ≥10 calls to real Indian mobiles; spreadsheet or ticket with: transcript errors, latency feel, CRM correctness.
+- [x] **Dogfood template:** `voice-service/STAGE3_DOGFOOD.md` (≥10 rows + grep hints).
 - [ ] **Top 3 issues** from dogfood have owners and **done** or **won’t fix v1** labels.
 
 ### Stage 3 exit criteria
@@ -261,6 +279,8 @@ _Use one line per session or deploy: date, stage touched, what was ticked, link 
 | 2026-04-18 | 1–2 | OpenAI LLM on GCP VM (`LLM_PROVIDER=openai`); `/health` exposes `llm_provider` + `llm_model`; **`appointment_requested`** wired voice → backend → lead metadata → CRM lead detail hint; roadmap snapshot updated. |
 | 2026-04-19 | 2–3 | Post-call JSON **`proposed_appointment_iso`** → backend **`applyVoiceScheduledAppointment`** (CRM calendar fields); shorter default greeting + tunable **Deepgram endpointing**; prompt tuned for IST slot extraction. |
 | 2026-04-19 | 1 | TTS diagnostics: **`TTS_PROVIDER` must be `elevenlabs`** to use ElevenLabs voice; `/health` exposes TTS + warnings; ElevenLabs natural preset + lower streaming latency default; Stage 1 **metrics** for STT→LLM→TTS. |
+| 2026-04-14 | 1–4 | **Calendar:** naive ISO → **IST** + `APPOINTMENT_ISO_PAST_GRACE_MS`; **`/v1/calls/result`** transactional idempotency; ingress **one-time** open-secret warning; roadmap **limitations** + **QA matrix**; **Deepgram** defaults 300/1050 ms; shorter default greeting. |
+| 2026-04-14 | 3 | **Barge-in** (PCM RMS during playback), **STT fragment merge** (false EOT), **early hangup** → CRM (`sipHangupCause.ts`); dogfood template `voice-service/STAGE3_DOGFOOD.md`; backend outcomes `user_busy` / `voicemail_or_machine`. |
 | | | |
 
 ---

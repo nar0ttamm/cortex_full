@@ -106,95 +106,122 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  const dupCheck = await db.query(
-    `SELECT metadata->'communications_log' as log FROM leads WHERE id = $1 AND tenant_id = $2`,
-    [lead_id, tenant_id]
-  );
-  const log = dupCheck.rows[0]?.log;
-  if (Array.isArray(log) && log.some((e) => e && e.call_id === call_id)) {
-    return res.json({ status: 'duplicate', lead_id, call_id, message: 'Already processed' });
-  }
-
-  const oc = outcome || 'unknown';
-  const aiCallStatus = ['dial_failed', 'technical_failure', 'no_answer'].includes(oc) ? 'Failed' : 'Completed';
-
-  const metadataUpdate = {
-    ai_call_status: aiCallStatus,
-    call_transcript: transcript || '',
-    call_result: oc,
-    last_call_at: new Date().toISOString(),
-    appointment_requested: Boolean(appointment_requested),
-  };
-
-  // Determine lead status update based on outcome
-  let newStatus = null;
-  if (outcome === 'interested' || outcome === 'appointment_booked') {
-    newStatus = 'interested';
-  } else if (outcome === 'not_interested') {
-    newStatus = 'not_interested';
-  }
-
-  const metaJson = JSON.stringify(metadataUpdate);
-
-  if (newStatus) {
-    await db.query(
-      `UPDATE leads
-       SET metadata = COALESCE(metadata, '{}') || $1::jsonb,
-           status = $2,
-           updated_at = NOW()
-       WHERE id = $3 AND tenant_id = $4`,
-      [metaJson, newStatus, lead_id, tenant_id]
-    );
-  } else {
-    await db.query(
-      `UPDATE leads
-       SET metadata = COALESCE(metadata, '{}') || $1::jsonb,
-           updated_at = NOW()
-       WHERE id = $2 AND tenant_id = $3`,
-      [metaJson, lead_id, tenant_id]
-    );
-  }
-
-  // Log to communications_log
-  const commEntry = {
-    type: 'call',
-    direction: 'outbound',
-    message: summary || transcript || '',
-    status: outcome || 'completed',
-    timestamp: new Date().toISOString(),
-    duration_seconds: duration_seconds || 0,
-    call_id,
-    appointment_requested: Boolean(appointment_requested),
-  };
-
-  await db.query(
-    `UPDATE leads
-     SET metadata = jsonb_set(
-       COALESCE(metadata, '{}'),
-       '{communications_log}',
-       COALESCE(metadata->'communications_log', '[]'::jsonb) || $1::jsonb
-     ), updated_at = NOW()
-     WHERE id = $2`,
-    [JSON.stringify([commEntry]), lead_id]
-  );
-
+  const client = await db.getPool().connect();
+  /** @type {{ applied: boolean; reason?: string; appointment_date?: string }} */
   let calendar = { applied: false };
-  try {
-    calendar = await applyVoiceScheduledAppointment({
-      tenant_id,
-      lead_id,
-      proposed_appointment_iso:
-        typeof proposed_appointment_iso === 'string' ? proposed_appointment_iso.trim() : proposed_appointment_iso,
-      summary: summary || transcript || '',
-    });
-    if (calendar.applied) {
-      console.log('[calls/result] CRM calendar scheduled from voice', lead_id, calendar.appointment_date);
-    }
-  } catch (e) {
-    console.error('[calls/result] calendar from voice failed', e.message);
-  }
 
-  return res.json({ status: 'updated', lead_id, call_id, calendar });
+  try {
+    await client.query('BEGIN');
+
+    const lockRow = await client.query(
+      `SELECT id, metadata FROM leads WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+      [lead_id, tenant_id]
+    );
+    if (!lockRow.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    const log = lockRow.rows[0].metadata?.communications_log;
+    if (Array.isArray(log) && log.some((e) => e && e.call_id === call_id)) {
+      await client.query('ROLLBACK');
+      return res.json({ status: 'duplicate', lead_id, call_id, message: 'Already processed' });
+    }
+
+    const oc = outcome || 'unknown';
+    const aiCallStatus = ['dial_failed', 'technical_failure', 'no_answer', 'user_busy', 'voicemail_or_machine'].includes(oc)
+      ? 'Failed'
+      : 'Completed';
+
+    const metadataUpdate = {
+      ai_call_status: aiCallStatus,
+      call_transcript: transcript || '',
+      call_result: oc,
+      last_call_at: new Date().toISOString(),
+      appointment_requested: Boolean(appointment_requested),
+    };
+
+    let newStatus = null;
+    if (outcome === 'interested' || outcome === 'appointment_booked') {
+      newStatus = 'interested';
+    } else if (outcome === 'not_interested') {
+      newStatus = 'not_interested';
+    }
+
+    const metaJson = JSON.stringify(metadataUpdate);
+
+    if (newStatus) {
+      await client.query(
+        `UPDATE leads
+         SET metadata = COALESCE(metadata, '{}') || $1::jsonb,
+             status = $2,
+             updated_at = NOW()
+         WHERE id = $3 AND tenant_id = $4`,
+        [metaJson, newStatus, lead_id, tenant_id]
+      );
+    } else {
+      await client.query(
+        `UPDATE leads
+         SET metadata = COALESCE(metadata, '{}') || $1::jsonb,
+             updated_at = NOW()
+         WHERE id = $2 AND tenant_id = $3`,
+        [metaJson, lead_id, tenant_id]
+      );
+    }
+
+    const commEntry = {
+      type: 'call',
+      direction: 'outbound',
+      message: summary || transcript || '',
+      status: outcome || 'completed',
+      timestamp: new Date().toISOString(),
+      duration_seconds: duration_seconds || 0,
+      call_id,
+      appointment_requested: Boolean(appointment_requested),
+    };
+
+    await client.query(
+      `UPDATE leads
+       SET metadata = jsonb_set(
+         COALESCE(metadata, '{}'),
+         '{communications_log}',
+         COALESCE(metadata->'communications_log', '[]'::jsonb) || $1::jsonb
+       ), updated_at = NOW()
+       WHERE id = $2 AND tenant_id = $3`,
+      [JSON.stringify([commEntry]), lead_id, tenant_id]
+    );
+
+    try {
+      calendar = await applyVoiceScheduledAppointment(
+        {
+          tenant_id,
+          lead_id,
+          proposed_appointment_iso:
+            typeof proposed_appointment_iso === 'string' ? proposed_appointment_iso.trim() : proposed_appointment_iso,
+          summary: summary || transcript || '',
+        },
+        client
+      );
+      if (calendar.applied) {
+        console.log('[calls/result] CRM calendar scheduled from voice', lead_id, calendar.appointment_date);
+      }
+    } catch (e) {
+      console.error('[calls/result] calendar from voice failed', e.message);
+      calendar = { applied: false, reason: 'calendar_error' };
+    }
+
+    await client.query('COMMIT');
+    return res.json({ status: 'updated', lead_id, call_id, calendar });
+  } catch (e) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {
+      /* ignore */
+    }
+    throw e;
+  } finally {
+    client.release();
+  }
 }));
 
 // GET /v1/calls/:tenantId

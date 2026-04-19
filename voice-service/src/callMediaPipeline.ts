@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { createHash } from 'crypto';
 import { speechRecognition } from './speechRecognition';
 import { conversationEngine, hasLlmConfigured } from './conversationEngine';
 import { synthesizeTelephonyPcm8k } from './voiceSynthesis';
@@ -11,6 +12,7 @@ import { sessionStore } from './sessionStore';
 import { notifyBackendCallResult, notifyBackendCallEvent } from './backendNotify';
 import { pcm16leMonoToWav } from './wavUtil';
 import { metricVoice } from './voiceCallMetrics';
+import { accumulateBargeEnergy, bargeInEnabled, getBargeInSampleRate } from './pcmBargeIn';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
@@ -44,6 +46,13 @@ interface Runtime {
   /** CHANNEL_ANSWER time — for Stage 1 latency metrics. */
   answeredAtMs: number;
   firstSttFinalLogged: boolean;
+  /** Merge consecutive finals when the first looks like a fragment (false end-of-turn). */
+  sttMerge: { parts: string[]; timer: ReturnType<typeof setTimeout> | null } | null;
+  /** PCM energy accumulator for barge-in during TTS. */
+  bargeEnergy: { accMs: number };
+  /** True only during post-broadcast sleep (user can interrupt playback). */
+  bargePlaybackArmed: boolean;
+  playbackAbort: AbortController | undefined;
 }
 
 const pipelines = new Map<string, Runtime>();
@@ -57,8 +66,37 @@ function getTtsOutputDir(): string {
 
 /** After TTS + playback, ignore forked audio briefly so echo does not become a fake “user” turn. */
 const POST_TTS_GATE_MS = parseInt(process.env.VOICE_STT_POST_TTS_MS || '700', 10);
+/** Slightly shorter gate right after the first greeting so the user can speak sooner. */
+const POST_GREETING_STT_GATE_MS = parseInt(process.env.VOICE_STT_POST_GREETING_MS || '450', 10);
+/** ms after assistant “wrap-up” reply before hangup. */
+const WRAP_UP_HANGUP_MS = parseInt(process.env.VOICE_WRAP_UP_DELAY_MS || '700', 10);
 /** Deepgram sometimes emits duplicate finals; ignore repeats within this window. */
 const USER_UTTERANCE_DEDUPE_MS = parseInt(process.env.VOICE_STT_DEDUPE_MS || '2800', 10);
+/** Short finals without sentence end may be a false end-of-turn; wait for a follow-up final. */
+const STT_MERGE_TAIL_MS = parseInt(process.env.VOICE_STT_MERGE_TAIL_MS || '420', 10);
+const STT_MERGE_MAX_SHORT = parseInt(process.env.VOICE_STT_MERGE_MAX_SHORT || '28', 10);
+
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const t = setTimeout(resolve, ms);
+    const done = () => {
+      clearTimeout(t);
+      resolve();
+    };
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
+
+/** True if STT final might be an incomplete clause (wait for possible continuation). */
+function looksLikeIncompleteUtterance(s: string): boolean {
+  const t = s.trim();
+  if (t.length === 0 || t.length > STT_MERGE_MAX_SHORT) return false;
+  return !/[.!?।…]['")\]]?\s*$/u.test(t);
+}
 
 function normalizeUtterance(s: string): string {
   return s
@@ -66,6 +104,89 @@ function normalizeUtterance(s: string): string {
     .replace(/\s+/g, ' ')
     .replace(/[^\p{L}\p{N}\s?.!।]/gu, '')
     .trim();
+}
+
+function hashGreetingKey(s: string): string {
+  return createHash('sha256').update(s).digest('hex').slice(0, 20);
+}
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Instant path: `VOICE_GREETING_WAV` (8 kHz mono WAV readable by FreeSWITCH).
+ * Else: TTS once → disk cache keyed by exact greeting string (same text on later calls = no TTS API).
+ */
+async function prepareGreetingWavFile(greeting: string): Promise<string> {
+  const envWav = process.env.VOICE_GREETING_WAV?.trim();
+  if (envWav && (await fileExists(envWav))) {
+    return envWav;
+  }
+  if (envWav) {
+    console.warn(`[pipeline] VOICE_GREETING_WAV not found or unreadable (${envWav}) — using TTS + cache`);
+  }
+  const dir = getTtsOutputDir();
+  await fs.mkdir(dir, { recursive: true });
+  const cachePath = path.join(dir, `cortexflow-greet-${hashGreetingKey(greeting)}.wav`);
+  if (await fileExists(cachePath)) return cachePath;
+  const pcm = await synthesizeTelephonyPcm8k(greeting);
+  const wav = pcm16leMonoToWav(pcm, 8000);
+  await fs.writeFile(cachePath, wav);
+  return cachePath;
+}
+
+function estimatePlaybackMsFromWavFile(buf: Buffer): number {
+  const pcmBytes = Math.max(0, buf.length - 44);
+  const ms = (pcmBytes / 2 / 8000) * 1000 + 250;
+  return Math.max(400, Math.min(30000, ms));
+}
+
+/** Play an existing WAV path (no synthesis). */
+async function playWavFile(
+  callId: string,
+  rt: Runtime,
+  wavPath: string,
+  seqRef: { n: number },
+  sttGateAfterMs: number = POST_TTS_GATE_MS
+): Promise<void> {
+  rt.blockSttAudio = true;
+  const gen = rt.generation;
+  try {
+    const buf = await fs.readFile(wavPath);
+    if (gen !== rt.generation) {
+      console.warn(`[pipeline:${callId}] skipping wav playback — stale generation`);
+      return;
+    }
+    seqRef.n += 1;
+    rt.aiSpeaking = true;
+    try {
+      const leg = (process.env.UUID_BROADCAST_LEG || 'both').trim() as 'aleg' | 'bleg' | 'both';
+      await uuidBroadcast(callId, wavPath, leg);
+    } catch (e) {
+      console.warn(`[pipeline:${callId}] uuid_broadcast`, (e as Error).message);
+    }
+    const ms = estimatePlaybackMsFromWavFile(buf);
+    rt.bargeEnergy = { accMs: 0 };
+    const ac = new AbortController();
+    rt.playbackAbort = ac;
+    rt.bargePlaybackArmed = true;
+    try {
+      await sleepAbortable(ms, ac.signal);
+    } finally {
+      rt.bargePlaybackArmed = false;
+      rt.playbackAbort = undefined;
+      rt.aiSpeaking = false;
+    }
+  } finally {
+    rt.blockSttAudio = false;
+    rt.sttGateUntil = Date.now() + sttGateAfterMs;
+  }
 }
 
 async function writeTempWav(callId: string, seq: number, wav: Buffer): Promise<string> {
@@ -84,11 +205,23 @@ async function writeTempWav(callId: string, seq: number, wav: Buffer): Promise<s
   return fp;
 }
 
+function triggerBargeInFromPcm(callId: string, rt: Runtime): void {
+  if (!rt.bargePlaybackArmed) return;
+  rt.bargePlaybackArmed = false;
+  rt.playbackAbort?.abort();
+  rt.generation += 1;
+  rt.aiSpeaking = false;
+  void uuidBreak(callId).catch(() => {});
+  metricVoice(callId, 'barge_in_pcm', 0, { triggered: true });
+  console.log(`[pipeline:${callId}] barge-in — stopping playback (PCM energy)`);
+}
+
 async function speakText(callId: string, rt: Runtime, text: string, seqRef: { n: number }): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed) return;
   rt.blockSttAudio = true;
   const gen = rt.generation;
+  let fp: string | undefined;
   try {
     const ttsStart = Date.now();
     const pcm = await synthesizeTelephonyPcm8k(trimmed);
@@ -106,7 +239,7 @@ async function speakText(callId: string, rt: Runtime, text: string, seqRef: { n:
     }
     const wav = pcm16leMonoToWav(pcm, 8000);
     seqRef.n += 1;
-    const fp = await writeTempWav(callId, seqRef.n, wav);
+    fp = await writeTempWav(callId, seqRef.n, wav);
     rt.aiSpeaking = true;
     try {
       // Outbound to PSTN: audio often needs `bleg` or `both`; `aleg` alone can be silent on some trunks.
@@ -116,13 +249,34 @@ async function speakText(callId: string, rt: Runtime, text: string, seqRef: { n:
       console.warn(`[pipeline:${callId}] uuid_broadcast`, (e as Error).message);
     }
     const ms = Math.max(500, Math.min(30000, (pcm.length / 2 / 8000) * 1000 + 250));
-    await new Promise<void>(resolve => setTimeout(resolve, ms));
-    rt.aiSpeaking = false;
+    rt.bargeEnergy = { accMs: 0 };
+    const ac = new AbortController();
+    rt.playbackAbort = ac;
+    rt.bargePlaybackArmed = true;
+    try {
+      await sleepAbortable(ms, ac.signal);
+    } finally {
+      rt.bargePlaybackArmed = false;
+      rt.playbackAbort = undefined;
+      rt.aiSpeaking = false;
+    }
     void fs.unlink(fp).catch(() => {});
   } finally {
     rt.blockSttAudio = false;
     rt.sttGateUntil = Date.now() + POST_TTS_GATE_MS;
   }
+}
+
+/** Short sign-off when the user says thanks/bye — optional `VOICE_SIGNOFF_WAV`, else TTS `VOICE_SIGNOFF_TEXT`. */
+async function speakUserFarewell(callId: string, rt: Runtime, seqRef: { n: number }): Promise<string> {
+  const envWav = process.env.VOICE_SIGNOFF_WAV?.trim();
+  const textFallback = (process.env.VOICE_SIGNOFF_TEXT || 'Thanks, take care. Goodbye.').trim();
+  if (envWav && (await fileExists(envWav))) {
+    await playWavFile(callId, rt, envWav, seqRef);
+    return textFallback;
+  }
+  await speakText(callId, rt, textFallback, seqRef);
+  return textFallback;
 }
 
 /** Short default greeting → faster first TTS. Override with VOICE_GREETING_TEMPLATE (use {name}). */
@@ -133,7 +287,7 @@ function buildOutboundGreeting(ctx: PipelineCtx): string {
   if (tmpl) {
     return tmpl.replace(/\{name\}/g, name);
   }
-  return `Hi ${name}, this is CortexFlow. Got a minute?`;
+  return `Hi ${name}, CortexFlow here — got a minute?`;
 }
 
 /**
@@ -186,6 +340,91 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     turnIndex: 0,
     answeredAtMs: answeredAt,
     firstSttFinalLogged: false,
+    sttMerge: null,
+    bargeEnergy: { accMs: 0 },
+    bargePlaybackArmed: false,
+    playbackAbort: undefined,
+  };
+
+  const flushUserTurn = async (userLine: string): Promise<void> => {
+    const cleaned = userLine.trim();
+    if (!cleaned) return;
+    if (rt.processingUserTurn) return;
+
+    const norm = normalizeUtterance(cleaned);
+    const now = Date.now();
+    if (norm && norm === rt.lastUserNorm && now - rt.lastUserAt < USER_UTTERANCE_DEDUPE_MS) {
+      return;
+    }
+
+    rt.processingUserTurn = true;
+    const turnStart = Date.now();
+    rt.turnIndex += 1;
+    const turnN = rt.turnIndex;
+    if (norm) {
+      rt.lastUserNorm = norm;
+      rt.lastUserAt = now;
+    }
+    try {
+      console.log(`[pipeline:${callId}] user: ${cleaned}`);
+      await callStorage.logEvent(callId, 'stt_final', { text: cleaned });
+      rt.conversationHistory.push({ role: 'user', content: cleaned });
+      await sessionStore.merge(callId, {
+        tenant_id: ctx.tenant_id,
+        lead_id: ctx.lead_id,
+        speaker: 'user',
+        transcript_tail: cleaned,
+      });
+
+      if (rt.turnIndex >= 2 && conversationEngine.userSignalsCallEnd(cleaned)) {
+        const assistantText = await speakUserFarewell(callId, rt, seqRef);
+        rt.conversationHistory.push({ role: 'assistant', content: assistantText });
+        await callStorage.logEvent(callId, 'ai_reply', { text: assistantText, kind: 'user_farewell' });
+        await sessionStore.merge(callId, {
+          tenant_id: ctx.tenant_id,
+          lead_id: ctx.lead_id,
+          speaker: 'ai',
+          transcript_tail: assistantText,
+        });
+        metricVoice(callId, 'turn_user_to_ai_done', Date.now() - turnStart, { turn: turnN });
+        setTimeout(() => void finalizePipeline(callId, 'user_farewell'), WRAP_UP_HANGUP_MS);
+        return;
+      }
+
+      let responseText = '';
+      let firstLlmChunkLogged = false;
+      await conversationEngine.streamResponse(rt.conversationHistory, async (chunk: string) => {
+        if (!firstLlmChunkLogged && chunk.trim()) {
+          firstLlmChunkLogged = true;
+          metricVoice(callId, 'stt_final_to_first_llm_chunk_ms', Date.now() - turnStart, { turn: turnN });
+        }
+        responseText += chunk;
+        await speakText(callId, rt, chunk, seqRef);
+      });
+
+      const assistantText = responseText.trim();
+      if (assistantText) {
+        rt.conversationHistory.push({ role: 'assistant', content: assistantText });
+        await callStorage.logEvent(callId, 'ai_reply', { text: assistantText });
+        await sessionStore.merge(callId, {
+          tenant_id: ctx.tenant_id,
+          lead_id: ctx.lead_id,
+          speaker: 'ai',
+          transcript_tail: assistantText,
+        });
+      }
+
+      metricVoice(callId, 'turn_user_to_ai_done', Date.now() - turnStart, { turn: turnN });
+
+      if (conversationEngine.shouldEndCall(responseText)) {
+        setTimeout(() => void finalizePipeline(callId, 'wrap_up'), WRAP_UP_HANGUP_MS);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[pipeline:${callId}] turn error`, msg);
+    } finally {
+      rt.processingUserTurn = false;
+    }
   };
 
   const stt = speechRecognition.createStreamingSession({
@@ -198,65 +437,55 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
       }
       const cleaned = text.trim();
       if (!cleaned) return;
-      const norm = normalizeUtterance(cleaned);
-      const now = Date.now();
-      if (norm && norm === rt.lastUserNorm && now - rt.lastUserAt < USER_UTTERANCE_DEDUPE_MS) {
+      if (rt.processingUserTurn) return;
+
+      if (rt.sttMerge) {
+        rt.sttMerge.parts.push(cleaned);
+        if (rt.sttMerge.timer) clearTimeout(rt.sttMerge.timer);
+        if (!looksLikeIncompleteUtterance(cleaned)) {
+          const parts = rt.sttMerge.parts;
+          rt.sttMerge = null;
+          const merged = parts.join(' ').replace(/\s+/g, ' ').trim();
+          if (parts.length > 1) {
+            metricVoice(callId, 'stt_false_eot_merged', 0, { parts: parts.length });
+            console.log(`[pipeline:${callId}] STT merged ${parts.length} finals (false end-of-turn)`);
+          }
+          void flushUserTurn(merged);
+          return;
+        }
+        rt.sttMerge.timer = setTimeout(() => {
+          const parts = rt.sttMerge?.parts;
+          rt.sttMerge = null;
+          if (!parts?.length) return;
+          const merged = parts.join(' ').replace(/\s+/g, ' ').trim();
+          if (parts.length > 1) {
+            metricVoice(callId, 'stt_false_eot_merged', 0, { parts: parts.length });
+            console.log(`[pipeline:${callId}] STT merged ${parts.length} finals (false end-of-turn)`);
+          }
+          void flushUserTurn(merged);
+        }, STT_MERGE_TAIL_MS);
         return;
       }
-      if (norm) {
-        rt.lastUserNorm = norm;
-        rt.lastUserAt = now;
+
+      if (looksLikeIncompleteUtterance(cleaned)) {
+        rt.sttMerge = {
+          parts: [cleaned],
+          timer: setTimeout(() => {
+            const parts = rt.sttMerge?.parts;
+            rt.sttMerge = null;
+            if (!parts?.length) return;
+            const merged = parts.join(' ').replace(/\s+/g, ' ').trim();
+            if (parts.length > 1) {
+              metricVoice(callId, 'stt_false_eot_merged', 0, { parts: parts.length });
+              console.log(`[pipeline:${callId}] STT merged ${parts.length} finals (false end-of-turn)`);
+            }
+            void flushUserTurn(merged);
+          }, STT_MERGE_TAIL_MS),
+        };
+        return;
       }
-      if (rt.processingUserTurn) return;
-      rt.processingUserTurn = true;
-      const turnStart = Date.now();
-      rt.turnIndex += 1;
-      const turnN = rt.turnIndex;
-      try {
-        console.log(`[pipeline:${callId}] user: ${cleaned}`);
-        await callStorage.logEvent(callId, 'stt_final', { text: cleaned });
-        rt.conversationHistory.push({ role: 'user', content: cleaned });
-        await sessionStore.merge(callId, {
-          tenant_id: ctx.tenant_id,
-          lead_id: ctx.lead_id,
-          speaker: 'user',
-          transcript_tail: cleaned,
-        });
 
-        let responseText = '';
-        let firstLlmChunkLogged = false;
-        await conversationEngine.streamResponse(rt.conversationHistory, async (chunk: string) => {
-          if (!firstLlmChunkLogged && chunk.trim()) {
-            firstLlmChunkLogged = true;
-            metricVoice(callId, 'stt_final_to_first_llm_chunk_ms', Date.now() - turnStart, { turn: turnN });
-          }
-          responseText += chunk;
-          await speakText(callId, rt, chunk, seqRef);
-        });
-
-        const assistantText = responseText.trim();
-        if (assistantText) {
-          rt.conversationHistory.push({ role: 'assistant', content: assistantText });
-          await callStorage.logEvent(callId, 'ai_reply', { text: assistantText });
-          await sessionStore.merge(callId, {
-            tenant_id: ctx.tenant_id,
-            lead_id: ctx.lead_id,
-            speaker: 'ai',
-            transcript_tail: assistantText,
-          });
-        }
-
-        metricVoice(callId, 'turn_user_to_ai_done', Date.now() - turnStart, { turn: turnN });
-
-        if (conversationEngine.shouldEndCall(responseText)) {
-          setTimeout(() => void finalizePipeline(callId, 'wrap_up'), 1200);
-        }
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error(`[pipeline:${callId}] turn error`, msg);
-      } finally {
-        rt.processingUserTurn = false;
-      }
+      void flushUserTurn(cleaned);
     },
     onSpeechStart: () => {
       if (rt.ended) return;
@@ -273,11 +502,20 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
   });
 
   rt.stt = stt;
+  const forkSr = getBargeInSampleRate();
   rt.unregister = registerAudioConsumer(callId, buf => {
     if (rt.ended) return;
+    if (bargeInEnabled() && rt.bargePlaybackArmed && rt.blockSttAudio) {
+      if (accumulateBargeEnergy(buf, forkSr, rt.bargeEnergy)) {
+        triggerBargeInFromPcm(callId, rt);
+      }
+    }
     if (rt.blockSttAudio || Date.now() < rt.sttGateUntil) return;
     stt.write(buf);
   });
+
+  const greeting = buildOutboundGreeting(ctx);
+  let greetingWavPath = '';
 
   try {
     const wsUrl = buildAudioIngressUrl(callId);
@@ -294,8 +532,14 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     // drachtio mod_audio_fork API: `uuid_audio_fork <uuid> start <url> <mix-type> <rate> [metadata]`
     // mix-type: mono | mixed | stereo — rate: 8k | 16k (NOT mono@16000h; that form breaks the parser → -ERR no reply)
     const mix = (process.env.AUDIO_FORK_MIX || 'mono 16k').trim();
-    await uuidAudioForkStart({ callUuid: callId, wsUrl, mix });
+    const parallelStart = Date.now();
+    const [, wavPath] = await Promise.all([
+      uuidAudioForkStart({ callUuid: callId, wsUrl, mix }),
+      prepareGreetingWavFile(greeting),
+    ]);
+    greetingWavPath = wavPath;
     metricVoice(callId, 'answer_to_audio_fork', Date.now() - answeredAt);
+    metricVoice(callId, 'fork_and_greeting_wav_ready_ms', Date.now() - parallelStart);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[pipeline:${callId}] uuid_audio_fork failed`, msg);
@@ -312,17 +556,30 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
   // Clear any placeholder media (e.g. silence_stream) so the first uuid_broadcast is clean.
   await uuidBreak(callId).catch(() => {});
 
-  const greeting = buildOutboundGreeting(ctx);
-
   rt.conversationHistory.push({ role: 'assistant', content: greeting });
   const g0 = Date.now();
   try {
-    await speakText(callId, rt, greeting, seqRef);
+    await playWavFile(callId, rt, greetingWavPath, seqRef, POST_GREETING_STT_GATE_MS);
     metricVoice(callId, 'answer_to_greeting_done', Date.now() - answeredAt);
-    metricVoice(callId, 'greeting_tts_only', Date.now() - g0);
+    metricVoice(callId, 'greeting_playback_ms', Date.now() - g0);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`[pipeline:${callId}] greeting TTS failed`, msg);
+    console.error(`[pipeline:${callId}] greeting playback failed`, msg);
+  }
+}
+
+/** Pre-build default greeting WAV on startup so the first real call skips TTS network (after deploy). */
+export async function warmGreetingTtsCache(): Promise<void> {
+  if (!process.env.DEEPGRAM_API_KEY?.trim()) return;
+  const tmpl = process.env.VOICE_GREETING_TEMPLATE?.trim();
+  const s = tmpl ? tmpl.replace(/\{name\}/g, 'there') : `Hi there, CortexFlow here — got a minute?`;
+  try {
+    await prepareGreetingWavFile(s);
+    console.log(
+      `[cortex_voice] Greeting TTS cache warmed (matches template with name “there”). For per-lead names, first call still builds cache once.`
+    );
+  } catch (e: unknown) {
+    console.warn(`[cortex_voice] Greeting warmup skipped:`, e instanceof Error ? e.message : e);
   }
 }
 
@@ -346,6 +603,8 @@ export async function stopEslCallPipeline(callId: string, reason?: string): Prom
 
   pipelines.delete(callId);
   rt.ended = true;
+  if (rt.sttMerge?.timer) clearTimeout(rt.sttMerge.timer);
+  rt.sttMerge = null;
 
   try {
     rt.unregister();

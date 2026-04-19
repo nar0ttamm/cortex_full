@@ -7,6 +7,7 @@ import { attachAudioIngressWss } from './audioIngressServer';
 import { initEslVoiceHooks } from './eslVoiceHooks';
 import { getLlmRuntimeSummary } from './conversationEngine';
 import { getTtsRuntimeSummary, logTtsStartupHints } from './voiceSynthesis';
+import { warmGreetingTtsCache } from './callMediaPipeline';
 
 const app = express();
 app.use(express.json());
@@ -70,6 +71,7 @@ server.listen(PORT, HOST, () => {
     );
   }
   void initEslVoiceHooks();
+  void warmGreetingTtsCache();
 });
 
 export default app;

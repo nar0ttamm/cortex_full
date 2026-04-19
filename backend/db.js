@@ -25,6 +25,8 @@ module.exports = {
   query: (text, params) => getPool().query(text, params),
   get pool() {
     return getPool();
-  }
+  },
+  /** Use for multi-step routes that need `BEGIN` / `COMMIT` (e.g. idempotent webhooks). */
+  getPool,
 };
 
