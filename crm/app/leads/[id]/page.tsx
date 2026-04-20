@@ -17,6 +17,34 @@ interface Note {
   timestamp: string;
 }
 
+interface TranscriptLine {
+  speaker: 'ai' | 'lead';
+  text: string;
+}
+
+function parseTranscript(raw: string): TranscriptLine[] {
+  if (!raw) return [];
+  return raw
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const lower = line.toLowerCase();
+      const aiPrefixes = ['ai:', 'agent:', 'assistant:', 'bot:'];
+      const leadPrefixes = ['customer:', 'lead:', 'user:', 'caller:'];
+      if (aiPrefixes.some(p => lower.startsWith(p))) {
+        const idx = line.indexOf(':');
+        return { speaker: 'ai' as const, text: line.slice(idx + 1).trim() };
+      }
+      if (leadPrefixes.some(p => lower.startsWith(p))) {
+        const idx = line.indexOf(':');
+        return { speaker: 'lead' as const, text: line.slice(idx + 1).trim() };
+      }
+      return null;
+    })
+    .filter((l): l is TranscriptLine => l !== null);
+}
+
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
@@ -25,6 +53,23 @@ function timeAgo(iso: string) {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
+}
+
+function fmtDuration(sec?: number | null) {
+  if (sec == null || !Number.isFinite(sec)) return null;
+  const s = Math.max(0, Math.floor(sec));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+function statusBadge(status: string) {
+  const s = (status || '').toLowerCase();
+  if (s === 'failed') return 'text-red-700 dark:text-red-400';
+  if (s === 'ringing' || s === 'active' || s === 'answered') return 'text-amber-700 dark:text-amber-400';
+  if (s === 'completed' || s === 'ended') return 'text-emerald-700 dark:text-emerald-400';
+  if (s === 'initiating' || s === 'dialing') return 'text-sky-700 dark:text-sky-400';
+  return 'text-slate-600 dark:text-slate-400';
 }
 
 export default function LeadDetailPage() {
@@ -48,16 +93,16 @@ export default function LeadDetailPage() {
 
   useEffect(() => { fetchLead(); }, [leadId]);
 
-  const fetchLeadCalls = useCallback(async () => {
+  const fetchLeadCalls = useCallback(async (silent = false) => {
     if (!leadId || !tenantId) return;
-    setCallsLoading(true);
+    if (!silent) setCallsLoading(true);
     try {
       const data = await fetchCallsForTenant(tenantId, { leadId, limit: 25 });
       setLeadCalls(data.calls || []);
     } catch {
-      setLeadCalls([]);
+      if (!silent) setLeadCalls([]);
     } finally {
-      setCallsLoading(false);
+      if (!silent) setCallsLoading(false);
     }
   }, [leadId, tenantId]);
 
@@ -65,12 +110,13 @@ export default function LeadDetailPage() {
     if (leadId && tenantId) void fetchLeadCalls();
   }, [leadId, tenantId, fetchLeadCalls]);
 
+  // Background poll only while call is live — no spinner flash
   useEffect(() => {
     if (!tenantId) return;
     const t = setInterval(() => {
       if (document.visibilityState !== 'visible') return;
       if (leadCallsRef.current.some((c) => isCallStatusLive(c.status))) {
-        void fetchLeadCalls();
+        void fetchLeadCalls(true);
       }
     }, 3500);
     return () => clearInterval(t);
@@ -82,8 +128,8 @@ export default function LeadDetailPage() {
     setCallActionOk(null);
     setStartingCall(true);
     try {
-      const res = await startAiCall(tenantId, leadId);
-      setCallActionOk(`Call initiated. ID: ${res.call_id?.slice(0, 8)}…`);
+      await startAiCall(tenantId, leadId);
+      setCallActionOk('Call started successfully. Connecting now…');
       await fetchLeadCalls();
       await fetchLead();
     } catch (e: unknown) {
@@ -105,8 +151,8 @@ export default function LeadDetailPage() {
       if (!data.lead) throw new Error('Lead not found');
       setLead(data.lead);
       setNotes(data.lead.metadata?.notes || []);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load lead');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to load lead');
     } finally {
       setLoading(false);
     }
@@ -126,8 +172,8 @@ export default function LeadDetailPage() {
       const note = data.note;
       if (note) setNotes((prev) => [...prev, note]);
       setNoteText('');
-    } catch (e: any) {
-      console.error(e.message);
+    } catch (e: unknown) {
+      console.error(e instanceof Error ? e.message : e);
     } finally {
       setAddingNote(false);
     }
@@ -137,7 +183,7 @@ export default function LeadDetailPage() {
     try {
       await fetch(`/api/leads/${leadId}/notes/${noteId}`, { method: 'DELETE' });
       setNotes(prev => prev.filter(n => n.id !== noteId));
-    } catch (e) {}
+    } catch {}
   };
 
   const getStatusColor = (status: string) => {
@@ -177,9 +223,32 @@ export default function LeadDetailPage() {
 
   if (loading) {
     return (
-      <AppShell title="Lead Detail" actions={backAction}>
-        <div className="flex items-center justify-center h-64">
-          <div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+      <AppShell title="Lead" actions={backAction}>
+        <div className="p-4 sm:p-6 lg:p-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 animate-pulse">
+            <div className="lg:col-span-2 space-y-4">
+              {[160, 120, 200].map(h => (
+                <div key={h} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm p-5" style={{ minHeight: h }}>
+                  <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded-full w-32 mb-5" />
+                  <div className="grid grid-cols-2 gap-4">
+                    {[1, 2, 3, 4].map(i => (
+                      <div key={i}><div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full w-16 mb-2" /><div className="h-3 bg-slate-200 dark:bg-slate-700 rounded-full w-28" /></div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-4">
+              {[120, 100].map(h => (
+                <div key={h} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm p-5" style={{ minHeight: h }}>
+                  <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded-full w-24 mb-4" />
+                  <div className="space-y-3">
+                    {[1, 2, 3].map(i => <div key={i} className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full" />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </AppShell>
     );
@@ -187,7 +256,7 @@ export default function LeadDetailPage() {
 
   if (error || !lead) {
     return (
-      <AppShell title="Lead Detail" actions={backAction}>
+      <AppShell title="Lead" actions={backAction}>
         <div className="p-6 text-center">
           <p className="text-slate-500 text-sm">{error || 'Lead not found'}</p>
           <Link href="/leads" className="text-teal-600 text-sm underline mt-2 inline-block">Back to Leads</Link>
@@ -196,8 +265,10 @@ export default function LeadDetailPage() {
     );
   }
 
+  const transcriptLines = parseTranscript(lead.call_transcript || '');
+
   return (
-    <AppShell title={lead.name || 'Lead Detail'} actions={backAction}>
+    <AppShell title={lead.name || 'Lead'} actions={backAction}>
       <div className="p-4 sm:p-6 lg:p-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
@@ -205,7 +276,7 @@ export default function LeadDetailPage() {
           <div className="lg:col-span-2 space-y-4">
             {/* Basic info */}
             <div className={card}>
-              <SectionTitle label="Basic Information" />
+              <SectionTitle label="Contact Information" />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <Field label="Full Name" value={lead.name} />
                 <Field label="Phone" value={lead.phone} />
@@ -227,16 +298,13 @@ export default function LeadDetailPage() {
                 <div>
                   <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Lead Status</p>
                   <span className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(lead.status || '')}`}>
-                    {lead.status || 'N/A'}
+                    {lead.status || 'New'}
                   </span>
                 </div>
                 <div>
                   <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">AI Call</p>
                   <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                    {lead.ai_call_status || 'Pending'}
-                    {(lead as any).metadata?.calling_mode === 'simulated' && (
-                      <span className="ml-2 px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-50 text-amber-700 border border-amber-200 uppercase">Sim</span>
-                    )}
+                    {lead.ai_call_status || 'Not called yet'}
                   </p>
                 </div>
                 <Field label="Appointment Status" value={lead.appointment_status || 'Not Scheduled'} />
@@ -246,37 +314,43 @@ export default function LeadDetailPage() {
               </div>
             </div>
 
-            {/* Outbound AI calls (cortex_voice → calls table) */}
+            {/* Call History */}
             <div className={card}>
-              <SectionTitle label="Outbound AI calls" />
-              <p className="text-xs text-slate-500 mb-3">
-                Rows from the voice service / backend <code className="text-[10px] bg-slate-100 dark:bg-slate-700 px-1 rounded">calls</code> table for this lead.
-              </p>
+              <SectionTitle label="Call History" />
               {callsLoading ? (
-                <p className="text-xs text-slate-400 py-4">Loading calls…</p>
+                <div className="space-y-2 animate-pulse">
+                  {[1, 2].map(i => <div key={i} className="h-8 bg-slate-100 dark:bg-slate-700 rounded-xl" />)}
+                </div>
               ) : leadCalls.length === 0 ? (
-                <p className="text-xs text-slate-400 py-2">No call attempts yet.</p>
+                <p className="text-xs text-slate-400 py-2">No calls made yet for this lead.</p>
               ) : (
                 <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-600">
                   <table className="w-full text-left text-xs">
                     <thead className="bg-slate-50 dark:bg-slate-700/50 text-slate-500 uppercase tracking-wide">
                       <tr>
-                        <th className="px-3 py-2">Time</th>
-                        <th className="px-3 py-2">Status</th>
-                        <th className="px-3 py-2">Error / summary</th>
+                        <th className="px-3 py-2.5">Date &amp; Time</th>
+                        <th className="px-3 py-2.5">Status</th>
+                        <th className="px-3 py-2.5 hidden sm:table-cell">Duration</th>
+                        <th className="px-3 py-2.5">Notes</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-600">
                       {leadCalls.map((c) => (
-                        <tr key={c.id}>
-                          <td className="px-3 py-2 text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                        <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                          <td className="px-3 py-2.5 text-slate-600 dark:text-slate-300 whitespace-nowrap">
                             {c.created_at ? new Date(c.created_at).toLocaleString() : '—'}
                           </td>
-                          <td className="px-3 py-2 font-semibold text-slate-800 dark:text-slate-100 transition-colors duration-300">
+                          <td className={`px-3 py-2.5 font-semibold transition-colors duration-300 ${statusBadge(c.status)}`}>
+                            {isCallStatusLive(c.status) && (
+                              <span className="inline-block w-1.5 h-1.5 rounded-full bg-current animate-pulse mr-1" />
+                            )}
                             {labelForCallDbStatus(c.status)}
                           </td>
-                          <td className="px-3 py-2 text-slate-500 dark:text-slate-400 max-w-xs truncate" title={c.error_message || c.summary || ''}>
-                            {c.error_message || c.summary || c.outcome || '—'}
+                          <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400 hidden sm:table-cell">
+                            {fmtDuration(c.duration_seconds) || '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400 max-w-xs truncate" title={c.summary || c.error_message || ''}>
+                            {c.summary || (c.error_message ? <span className="text-red-500">{c.error_message}</span> : '—')}
                           </td>
                         </tr>
                       ))}
@@ -293,16 +367,42 @@ export default function LeadDetailPage() {
             {lead.call_transcript && (
               <div className={card}>
                 <SectionTitle label="Call Transcript" />
-                <div className="bg-slate-50 dark:bg-slate-700 rounded-xl border border-slate-100 dark:border-slate-600 px-4 py-4">
-                  <p className="text-xs text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed font-mono">{lead.call_transcript}</p>
-                </div>
+                {transcriptLines.length > 0 ? (
+                  <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                    {transcriptLines.map((line, i) => (
+                      <div
+                        key={i}
+                        className={`flex gap-2.5 ${line.speaker === 'lead' ? 'flex-row-reverse' : ''}`}
+                      >
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold mt-0.5 ${
+                          line.speaker === 'ai'
+                            ? 'bg-teal-500 text-white'
+                            : 'bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200'
+                        }`}>
+                          {line.speaker === 'ai' ? 'AI' : (lead.name?.charAt(0)?.toUpperCase() || 'L')}
+                        </div>
+                        <div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed ${
+                          line.speaker === 'ai'
+                            ? 'bg-teal-50 dark:bg-teal-900/20 text-teal-900 dark:text-teal-100 rounded-tl-sm'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-100 rounded-tr-sm'
+                        }`}>
+                          {line.text}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 dark:bg-slate-700 rounded-xl border border-slate-100 dark:border-slate-600 px-4 py-4">
+                    <p className="text-xs text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">{lead.call_transcript}</p>
+                  </div>
+                )}
                 {lead.call_result && (
-                  <div className="mt-3">
-                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Call Result</p>
+                  <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Outcome</p>
                     <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{formatCallOutcome(lead.call_result)}</p>
-                    {(lead.appointment_requested === true || lead.metadata?.appointment_requested === true) && (
-                      <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
-                        Scheduling intent detected — follow up to confirm a slot.
+                    {(lead.appointment_requested === true || (lead as any).metadata?.appointment_requested === true) && (
+                      <p className="mt-2 text-xs font-medium text-violet-700 dark:text-violet-300">
+                        Appointment booked — check the Appointments page.
                       </p>
                     )}
                   </div>
@@ -314,14 +414,13 @@ export default function LeadDetailPage() {
             <div className={card}>
               <SectionTitle label={`Notes (${notes.length})`} />
 
-              {/* Add note */}
               <div className="mb-4">
                 <textarea
                   ref={noteRef}
                   value={noteText}
                   onChange={e => setNoteText(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAddNote(); }}
-                  placeholder="Add a note... (Ctrl+Enter to save)"
+                  placeholder="Add a note… (Ctrl+Enter to save)"
                   rows={3}
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 resize-none"
                 />
@@ -331,12 +430,11 @@ export default function LeadDetailPage() {
                     disabled={!noteText.trim() || addingNote}
                     className="px-4 py-1.5 bg-teal-500 hover:bg-teal-600 text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-40"
                   >
-                    {addingNote ? 'Saving...' : 'Add Note'}
+                    {addingNote ? 'Saving…' : 'Add Note'}
                   </button>
                 </div>
               </div>
 
-              {/* Notes list */}
               {notes.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-4">No notes yet</p>
               ) : (
@@ -381,7 +479,8 @@ export default function LeadDetailPage() {
                   <li className="flex items-start gap-3">
                     <span className="w-2.5 h-2.5 rounded-full bg-teal-500 mt-1 shrink-0 shadow-sm shadow-teal-200" />
                     <div>
-                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">AI Call {lead.ai_call_status}</p>
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">AI Call Made</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{lead.ai_call_status}</p>
                     </div>
                   </li>
                 )}
@@ -390,7 +489,9 @@ export default function LeadDetailPage() {
                     <span className="w-2.5 h-2.5 rounded-full bg-violet-500 mt-1 shrink-0 shadow-sm shadow-violet-200" />
                     <div>
                       <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Appointment Scheduled</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{lead.appointment_date ? new Date(lead.appointment_date).toLocaleString() : ''}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {lead.appointment_date ? new Date(lead.appointment_date).toLocaleString() : ''}
+                      </p>
                     </div>
                   </li>
                 )}
@@ -426,14 +527,11 @@ export default function LeadDetailPage() {
                   disabled={startingCall}
                   className="w-full flex items-center justify-between px-4 py-3 bg-slate-900 dark:bg-slate-700 border border-slate-700 dark:border-slate-600 rounded-xl text-sm font-semibold text-white hover:bg-slate-800 dark:hover:bg-slate-600 transition-colors disabled:opacity-50"
                 >
-                  {startingCall ? 'Starting…' : 'Start AI outbound call'}
+                  {startingCall ? 'Connecting…' : 'Start AI Call'}
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                   </svg>
                 </button>
-                <p className="text-[10px] text-slate-400 px-1">
-                  Uses backend <code className="text-[9px]">/v1/calls/start</code> → voice VM. Fails fast with a clear message if the VM is off or voice errors.
-                </p>
                 <Link
                   href="/communications"
                   className="flex items-center justify-between px-4 py-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-100 dark:border-teal-800 rounded-xl text-sm font-semibold text-teal-700 dark:text-teal-400 hover:bg-teal-100 dark:hover:bg-teal-900/30 transition-colors group"
@@ -446,14 +544,14 @@ export default function LeadDetailPage() {
               </div>
             </div>
 
-            {/* Notes count summary */}
+            {/* Notes summary */}
             {notes.length > 0 && (
               <div className={`${card.replace('sm:p-6', '')} bg-amber-50 dark:bg-amber-900/10 border-amber-100 dark:border-amber-900/20`}>
                 <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-2">
                   <span>📝</span>
                   {notes.length} note{notes.length > 1 ? 's' : ''}
                 </p>
-                <p className="text-[10px] text-amber-600/70 dark:text-amber-500/60 mt-1">Last: {timeAgo(notes[notes.length-1]?.timestamp)}</p>
+                <p className="text-[10px] text-amber-600/70 dark:text-amber-500/60 mt-1">Last: {timeAgo(notes[notes.length - 1]?.timestamp)}</p>
               </div>
             )}
           </div>

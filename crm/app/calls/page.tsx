@@ -15,6 +15,20 @@ function fmtDuration(sec?: number | null) {
   return `${m}:${String(r).padStart(2, '0')}`;
 }
 
+function formatOutcome(outcome: string | null | undefined): string {
+  if (!outcome) return '—';
+  const map: Record<string, string> = {
+    appointment_booked: 'Appointment Booked',
+    interested: 'Interested',
+    not_interested: 'Not Interested',
+    callback: 'Callback Requested',
+    unknown: '—',
+    dial_failed: 'Call Failed',
+    completed: 'Completed',
+  };
+  return map[outcome.toLowerCase()] || outcome.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function statusBadge(status: string) {
   const s = (status || '').toLowerCase();
   if (s === 'failed')
@@ -28,6 +42,20 @@ function statusBadge(status: string) {
   return 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600';
 }
 
+function SkeletonRow() {
+  return (
+    <tr className="animate-pulse">
+      <td className="px-4 py-3"><div className="h-3 bg-slate-200 dark:bg-slate-700 rounded-full w-28" /></td>
+      <td className="px-4 py-3"><div className="h-5 bg-slate-200 dark:bg-slate-700 rounded-lg w-20" /></td>
+      <td className="px-4 py-3"><div className="h-3 bg-slate-200 dark:bg-slate-700 rounded-full w-24" /></td>
+      <td className="px-4 py-3 hidden md:table-cell"><div className="h-3 bg-slate-200 dark:bg-slate-700 rounded-full w-28" /></td>
+      <td className="px-4 py-3 hidden lg:table-cell"><div className="h-3 bg-slate-200 dark:bg-slate-700 rounded-full w-12" /></td>
+      <td className="px-4 py-3 hidden lg:table-cell"><div className="h-3 bg-slate-200 dark:bg-slate-700 rounded-full w-32" /></td>
+      <td className="px-4 py-3"><div className="h-3 bg-slate-200 dark:bg-slate-700 rounded-full w-40" /></td>
+    </tr>
+  );
+}
+
 export default function CallsPage() {
   const { tenantId, ready, authError } = useTenantId();
   const [calls, setCalls] = useState<CallRow[]>([]);
@@ -38,21 +66,19 @@ export default function CallsPage() {
   const callsRef = useRef<CallRow[]>([]);
   callsRef.current = calls;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     if (!tenantId) return;
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) { setLoading(true); setError(null); }
       const data = await fetchCallsForTenant(tenantId, {
         limit: 150,
         status: statusFilter || undefined,
       });
       setCalls(data.calls || []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load calls');
-      setCalls([]);
+      if (!silent) setError(e instanceof Error ? e.message : 'Failed to load calls');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [tenantId, statusFilter]);
 
@@ -61,11 +87,12 @@ export default function CallsPage() {
     void load();
   }, [load, ready, tenantId]);
 
+  // Background poll — only while a call is live, no loading flash
   useEffect(() => {
     if (!tenantId) return;
     const t = setInterval(() => {
       if (document.visibilityState !== 'visible') return;
-      if (callsRef.current.some((c) => isCallStatusLive(c.status))) void load();
+      if (callsRef.current.some((c) => isCallStatusLive(c.status))) void load(true);
     }, 4000);
     return () => clearInterval(t);
   }, [tenantId, load]);
@@ -76,24 +103,24 @@ export default function CallsPage() {
     return calls.filter((c) => {
       const phone = (c.phone || c.lead_phone || '').toLowerCase();
       const name = (c.lead_name || '').toLowerCase();
-      const id = (c.lead_id || '').toLowerCase();
-      return phone.includes(q) || name.includes(q) || id.includes(q) || c.id.toLowerCase().includes(q);
+      return phone.includes(q) || name.includes(q);
     });
   }, [calls, query]);
 
   const liveCount = useMemo(() => calls.filter((c) => isCallStatusLive(c.status)).length, [calls]);
 
   return (
-    <AppShell title="AI calls" actions={null}>
+    <AppShell title="AI Calls" actions={null}>
       <div className="min-h-[calc(100vh-4rem)] bg-slate-50 dark:bg-slate-950">
         <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5">
+
           {/* Header */}
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
             <div>
-              <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Call history</h2>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-xl">
-                Outbound AI calls from the <code className="text-xs bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-600">calls</code> table.
-                Rows refresh faster while a call is live.
+              <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Call History</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                All outbound AI calls made from this workspace.
+                {liveCount > 0 && <span className="ml-1 text-amber-600 dark:text-amber-400 font-medium">{liveCount} call{liveCount > 1 ? 's' : ''} in progress.</span>}
               </p>
             </div>
             <div className="flex flex-wrap gap-3 items-center">
@@ -101,10 +128,13 @@ export default function CallsPage() {
                 <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Total</span>
                 <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{calls.length}</span>
               </div>
-              <div className="flex gap-2 rounded-xl bg-white dark:bg-slate-900 border border-violet-200 dark:border-violet-800 px-3 py-2 shadow-sm">
-                <span className="text-xs font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wide">Live</span>
-                <span className="text-sm font-bold text-violet-900 dark:text-violet-200">{liveCount}</span>
-              </div>
+              {liveCount > 0 && (
+                <div className="flex gap-2 rounded-xl bg-white dark:bg-slate-900 border border-violet-200 dark:border-violet-800 px-3 py-2 shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse self-center" />
+                  <span className="text-xs font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wide">Live</span>
+                  <span className="text-sm font-bold text-violet-900 dark:text-violet-200">{liveCount}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -113,10 +143,7 @@ export default function CallsPage() {
             <div className="relative flex-1 min-w-[200px]">
               <svg
                 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
               >
                 <circle cx="11" cy="11" r="8" />
                 <path strokeLinecap="round" d="m21 21-4.35-4.35" />
@@ -125,7 +152,7 @@ export default function CallsPage() {
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search phone, lead name, lead ID, call ID…"
+                placeholder="Search by name or phone number…"
                 className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm placeholder-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500/30"
               />
             </div>
@@ -134,16 +161,16 @@ export default function CallsPage() {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="text-sm rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-slate-900 dark:text-slate-100 shadow-sm min-w-[140px]"
+                className="text-sm rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-slate-900 dark:text-slate-100 shadow-sm min-w-[160px]"
               >
                 <option value="">All statuses</option>
-                <option value="initiating">initiating</option>
-                <option value="ringing">ringing</option>
-                <option value="active">active</option>
-                <option value="answered">answered</option>
-                <option value="completed">completed</option>
-                <option value="failed">failed</option>
-                <option value="ended">ended</option>
+                <option value="initiating">Connecting</option>
+                <option value="ringing">Ringing</option>
+                <option value="active">In Progress</option>
+                <option value="answered">Answered</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+                <option value="ended">Ended</option>
               </select>
               <button
                 type="button"
@@ -158,9 +185,7 @@ export default function CallsPage() {
           {authError ? (
             <p className="text-center text-sm text-slate-600 dark:text-slate-400 py-16">
               Please{' '}
-              <Link href="/login" className="text-teal-600 font-semibold underline">
-                sign in
-              </Link>{' '}
+              <Link href="/login" className="text-teal-600 font-semibold underline">sign in</Link>{' '}
               to view calls.
             </p>
           ) : !ready || !tenantId ? (
@@ -172,13 +197,26 @@ export default function CallsPage() {
               {error}
             </div>
           ) : loading ? (
-            <div className="flex justify-center py-24">
-              <div className="w-9 h-9 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700">
+                      {['When', 'Status', 'Lead', 'Phone', 'Duration', 'Outcome', 'Summary'].map(h => (
+                        <th key={h} className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : filtered.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 py-16 text-center">
               <p className="text-slate-600 dark:text-slate-400 text-sm font-medium">
-                {calls.length === 0 ? 'No calls yet for this workspace.' : 'No rows match your search or filter.'}
+                {calls.length === 0 ? 'No calls yet for this workspace.' : 'No results match your search.'}
               </p>
             </div>
           ) : (
@@ -187,45 +225,26 @@ export default function CallsPage() {
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="bg-slate-100 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700">
-                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                        When
-                      </th>
-                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                        Status
-                      </th>
-                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                        Lead
-                      </th>
-                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 hidden md:table-cell">
-                        Phone
-                      </th>
-                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 hidden lg:table-cell">
-                        Duration
-                      </th>
-                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 hidden lg:table-cell">
-                        Outcome
-                      </th>
-                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 hidden xl:table-cell">
-                        Call ID
-                      </th>
-                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                        Note
-                      </th>
+                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">When</th>
+                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">Status</th>
+                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">Lead</th>
+                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 hidden md:table-cell">Phone</th>
+                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 hidden lg:table-cell">Duration</th>
+                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 hidden lg:table-cell">Outcome</th>
+                      <th className="px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">Summary</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {filtered.map((c) => (
-                      <tr
-                        key={c.id}
-                        className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
-                      >
+                      <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                         <td className="px-4 py-3 text-slate-700 dark:text-slate-300 whitespace-nowrap text-xs">
                           {c.created_at ? new Date(c.created_at).toLocaleString() : '—'}
                         </td>
                         <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-semibold border ${statusBadge(c.status)}`}
-                          >
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border ${statusBadge(c.status)}`}>
+                            {isCallStatusLive(c.status) && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                            )}
                             {labelForCallDbStatus(c.status)}
                           </span>
                         </td>
@@ -235,29 +254,35 @@ export default function CallsPage() {
                               href={`/leads/${c.lead_id}`}
                               className="font-semibold text-teal-700 dark:text-teal-400 hover:underline"
                             >
-                              {c.lead_name || c.lead_id.slice(0, 8) + '…'}
+                              {c.lead_name || 'Unknown'}
                             </Link>
                           ) : (
                             <span className="text-slate-500">—</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-slate-800 dark:text-slate-200 font-mono text-xs hidden md:table-cell">
+                        <td className="px-4 py-3 text-slate-800 dark:text-slate-200 text-xs hidden md:table-cell">
                           {c.phone || c.lead_phone || '—'}
                         </td>
                         <td className="px-4 py-3 text-slate-600 dark:text-slate-400 text-xs hidden lg:table-cell tabular-nums">
                           {fmtDuration(c.duration_seconds)}
                         </td>
-                        <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-400 hidden lg:table-cell max-w-[120px] truncate" title={c.outcome || ''}>
-                          {c.outcome || '—'}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-[10px] text-slate-500 dark:text-slate-500 max-w-[100px] truncate hidden xl:table-cell" title={c.id}>
-                          {c.id}
+                        <td className="px-4 py-3 text-xs hidden lg:table-cell">
+                          {c.outcome && c.outcome !== 'unknown' ? (
+                            <span className={`inline-flex px-2 py-0.5 rounded-md text-xs font-medium ${
+                              c.outcome === 'appointment_booked' ? 'bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-300' :
+                              c.outcome === 'interested' ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/20 dark:text-teal-300' :
+                              c.outcome === 'not_interested' ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' :
+                              'bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                            }`}>
+                              {formatOutcome(c.outcome)}
+                            </span>
+                          ) : '—'}
                         </td>
                         <td
                           className="px-4 py-3 text-xs text-slate-600 dark:text-slate-400 max-w-[200px] sm:max-w-xs truncate"
-                          title={c.error_message || c.summary || ''}
+                          title={c.summary || c.error_message || ''}
                         >
-                          {c.error_message || c.summary || '—'}
+                          {c.summary || (c.error_message ? <span className="text-red-500">{c.error_message}</span> : '—')}
                         </td>
                       </tr>
                     ))}
