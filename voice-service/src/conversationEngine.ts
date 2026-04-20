@@ -17,7 +17,31 @@ interface CallSummary {
   proposed_appointment_iso?: string | null;
 }
 
-const SYSTEM_PROMPT = `You are a friendly and professional AI sales assistant for a business using CortexFlow CRM.
+/** Returns "Wednesday, 20 April 2026 — 14:32 IST" style string in Asia/Kolkata timezone. */
+function getCurrentIstDateString(): string {
+  try {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+    const timeStr = now.toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    return `${dateStr} — ${timeStr} IST`;
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
+function buildSystemPrompt(): string {
+  return `You are a friendly and professional AI sales assistant for a business using CortexFlow CRM.
 Your role is to:
 1. Warmly greet the prospect and confirm their interest
 2. Briefly explain how the business can help them
@@ -27,12 +51,14 @@ Your role is to:
 6. Be natural, empathetic, and never robotic
 7. Detect when the conversation is naturally ending and wrap up politely
 
-When the prospect wants to schedule: confirm date AND time in plain words (e.g. "tomorrow twelve noon IST"), then say they'll see it on the CRM calendar.
+Current date and time: ${getCurrentIstDateString()}
+When the prospect wants to schedule: confirm the day and clock time (e.g. "tomorrow at noon" or "Friday at 3 PM IST"). Use today's date above to calculate exact future dates. Then say they'll see it on the CRM calendar.
 Default to Indian English / Hinglish if they mix languages.
 When not interested: thank them politely and end the call graciously.
 If they say thanks or goodbye, reply once briefly— the call may hang up automatically after your sign-off.
 
 IMPORTANT: Keep each response under 35 words for low latency voice output. No markdown or bullet lists—spoken words only.`;
+}
 
 const END_SIGNALS = [
   'goodbye',
@@ -80,7 +106,7 @@ function buildOpenAiMessages(history: Message[]): OpenAI.Chat.Completions.ChatCo
     i += 1;
   }
   const rest = history.slice(i);
-  let systemContent = SYSTEM_PROMPT;
+  let systemContent = buildSystemPrompt();
   if (leadingAssistant.length > 0) {
     systemContent += `\n\nYou have already said to the caller: ${leadingAssistant.join(' ')}`;
   }
@@ -116,7 +142,19 @@ function takeFirstSentence(buf: string): { sentence: string; rest: string } | nu
   };
 }
 
-async function streamOpenAi(
+/** True for transient network errors worth a single retry. */
+function isRetryableError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message.toLowerCase() : String(e).toLowerCase();
+  return (
+    msg.includes('socket hang up') ||
+    msg.includes('econnreset') ||
+    msg.includes('network error') ||
+    msg.includes('etimedout') ||
+    msg.includes('fetch failed')
+  );
+}
+
+async function streamOpenAiAttempt(
   history: Message[],
   onChunk: (chunk: string) => Promise<void>
 ): Promise<string> {
@@ -131,6 +169,7 @@ async function streamOpenAi(
     model,
     messages,
     stream: true,
+    max_tokens: 120,
   });
 
   let fullResponse = '';
@@ -153,6 +192,22 @@ async function streamOpenAi(
   }
 
   return fullResponse;
+}
+
+async function streamOpenAi(
+  history: Message[],
+  onChunk: (chunk: string) => Promise<void>
+): Promise<string> {
+  try {
+    return await streamOpenAiAttempt(history, onChunk);
+  } catch (e) {
+    if (isRetryableError(e)) {
+      console.warn('[conversationEngine] LLM transient error, retrying once:', e instanceof Error ? e.message : e);
+      await new Promise(r => setTimeout(r, 800));
+      return await streamOpenAiAttempt(history, onChunk);
+    }
+    throw e;
+  }
 }
 
 const emptySummary = (): CallSummary => ({
@@ -191,6 +246,7 @@ export const conversationEngine = {
 
   async summarizeCall(history: Message[]): Promise<CallSummary> {
     const transcript = history.map(m => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content}`).join('\n');
+    const callDate = getCurrentIstDateString();
 
     const prompt = `Analyze this sales call transcript and respond with ONLY a JSON object:
 {
@@ -200,10 +256,12 @@ export const conversationEngine = {
   "proposed_appointment_iso": null
 }
 
+The call happened on: ${callDate}
 Rules for proposed_appointment_iso:
-- If the customer clearly agreed to a specific date AND clock time, set this to ISO 8601 with timezone offset (use Asia/Kolkata IST +05:30 for Indian prospects unless the transcript states another zone). Example: "2026-04-20T12:00:00+05:30" for 12:00 noon local.
+- If the customer clearly agreed to a specific date AND clock time, calculate the exact future date from the call date above. Set this to ISO 8601 with timezone offset +05:30. Example: if they said "tomorrow at 1 PM" and the call was on Monday 20 April 2026, set "2026-04-21T13:00:00+05:30".
+- "12 noon" or "twelve PM" = 12:00. "12 midnight" or "twelve AM" = 00:00 next calendar day.
 - If they only said "tomorrow" without a time, or "next week", or no concrete slot, use null.
-- Never invent a time that was not discussed.
+- Never invent a time that was not discussed. The date must be strictly in the future relative to the call time.
 
 Transcript:
 ${transcript}`;
