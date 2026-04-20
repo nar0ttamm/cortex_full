@@ -3,6 +3,10 @@ const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const config = require('../config');
 const { applyVoiceScheduledAppointment } = require('../services/appointmentFromCall');
+const {
+  sendAppointmentBookedNotifications,
+  sendCallbackNotifications,
+} = require('../services/notificationService');
 
 const router = Router();
 
@@ -215,6 +219,31 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
     }
 
     await client.query('COMMIT');
+
+    // Post-commit: fire outcome-based notifications (best-effort, never block the response)
+    void (async () => {
+      try {
+        const leadRow = await db.query(
+          'SELECT id, name, phone, email FROM leads WHERE id = $1 AND tenant_id = $2',
+          [lead_id, tenant_id]
+        );
+        const lead = leadRow.rows[0];
+        if (!lead) return;
+
+        if (outcome === 'appointment_booked' && calendar.applied && calendar.appointment_date) {
+          await sendAppointmentBookedNotifications({
+            tenantId: tenant_id,
+            lead,
+            appointmentIso: calendar.appointment_date,
+          });
+        } else if (outcome === 'callback') {
+          await sendCallbackNotifications({ tenantId: tenant_id, lead });
+        }
+      } catch (notifErr) {
+        console.error('[calls/result] post-commit notification failed:', notifErr.message);
+      }
+    })();
+
     return res.json({ status: 'updated', lead_id, call_id, calendar });
   } catch (e) {
     try {

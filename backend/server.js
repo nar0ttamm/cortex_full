@@ -41,6 +41,8 @@ app.use('/v1', require('./routes/email'));
 app.use('/v1', require('./routes/newCalls'));
 // New: Universal lead integration engine endpoints
 app.use('/v1', require('./routes/integrations'));
+// Manual + automatic notification triggers (WhatsApp / email)
+app.use('/v1', require('./routes/notifications'));
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars

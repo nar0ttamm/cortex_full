@@ -51,6 +51,7 @@ export const callController = {
 
     // ── LiveKit path (new) ─────────────────────────────────────────────────
     if (isLivekitConfigured()) {
+      const tenantName = await callStorage.getTenantName(tenant_id).catch(() => '');
       void startLivekitCall({
         callId,
         phone,
@@ -58,6 +59,7 @@ export const callController = {
         inquiry: call_script || '',
         leadId: lead_id,
         tenantId: tenant_id,
+        tenantName,
       }).catch(async (err: any) => {
         console.error('[callController.startCall:livekit]', err.message);
         try { await callStorage.updateCallStatus(callId, 'failed', err.message); } catch (_) {}
@@ -149,18 +151,28 @@ export const callController = {
         proposed_appointment_iso: iso,
       });
 
-      // Notify the main backend to update the lead
+      // Update lead metadata (appointment, ai_call_status, status promotion)
       const call = await callStorage.getCall(call_id);
+      if (call?.lead_id) {
+        await callStorage.updateLeadAfterCall({
+          lead_id:                 call.lead_id,
+          outcome:                 outcome || 'unknown',
+          appointment_requested:   apptReq,
+          proposed_appointment_iso: iso,
+        });
+      }
+
+      // Notify Vercel backend (best-effort — non-critical if it fails)
       if (call) {
-        await notifyBackendCallResult({
+        void notifyBackendCallResult({
           tenant_id: call.tenant_id,
-          lead_id: call.lead_id,
+          lead_id:   call.lead_id,
           call_id,
           transcript,
           summary,
           duration_seconds,
-          outcome: outcome || 'unknown',
-          appointment_requested: apptReq,
+          outcome:                 outcome || 'unknown',
+          appointment_requested:   apptReq,
           proposed_appointment_iso: iso,
         });
       }

@@ -90,6 +90,7 @@ export default function LeadDetailPage() {
   const [callActionError, setCallActionError] = useState<string | null>(null);
   const [callActionOk, setCallActionOk] = useState<string | null>(null);
   const [startingCall, setStartingCall] = useState(false);
+  const [sendingNotif, setSendingNotif] = useState(false);
 
   useEffect(() => { fetchLead(); }, [leadId]);
 
@@ -176,6 +177,27 @@ export default function LeadDetailPage() {
       console.error(e instanceof Error ? e.message : e);
     } finally {
       setAddingNote(false);
+    }
+  };
+
+  const handleSendNotification = async (type: 'appointment_booked' | 'callback') => {
+    setCallActionError(null);
+    setCallActionOk(null);
+    setSendingNotif(true);
+    try {
+      const res = await fetch(`/api/leads/${leadId}/notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to send notification');
+      const channels = (data.channels || []).join(' & ');
+      setCallActionOk(`Notification sent via ${channels || 'WhatsApp'}.`);
+    } catch (e: unknown) {
+      setCallActionError(e instanceof Error ? e.message : 'Failed to send notification');
+    } finally {
+      setSendingNotif(false);
     }
   };
 
@@ -532,6 +554,33 @@ export default function LeadDetailPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                   </svg>
                 </button>
+                {/* Manual notifications */}
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Send Notification</p>
+                  <div className="flex flex-col gap-1.5">
+                    {lead.appointment_status === 'Scheduled' && (
+                      <button
+                        type="button"
+                        onClick={() => handleSendNotification('appointment_booked')}
+                        disabled={sendingNotif}
+                        className="w-full flex items-center justify-between px-3.5 py-2.5 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-xl text-xs font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors disabled:opacity-50"
+                      >
+                        {sendingNotif ? 'Sending…' : 'Appointment Confirmation'}
+                        <span>📅</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleSendNotification('callback')}
+                      disabled={sendingNotif}
+                      className="w-full flex items-center justify-between px-3.5 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors disabled:opacity-50"
+                    >
+                      {sendingNotif ? 'Sending…' : 'Callback Reminder'}
+                      <span>📲</span>
+                    </button>
+                  </div>
+                </div>
+
                 <Link
                   href="/communications"
                   className="flex items-center justify-between px-4 py-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-100 dark:border-teal-800 rounded-xl text-sm font-semibold text-teal-700 dark:text-teal-400 hover:bg-teal-100 dark:hover:bg-teal-900/30 transition-colors group"

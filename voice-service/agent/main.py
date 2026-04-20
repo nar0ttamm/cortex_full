@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 """
-CortexFlow AI Voice Agent — LiveKit Agents 1.x pipeline.
-Replaces cortex_voice (FreeSWITCH/ESL) with:
-  Silero VAD → Deepgram STT → OpenAI LLM → Deepgram TTS
+CortexFlow AI Voice Agent — LiveKit Agents 1.x
+
+Supports two modes via AGENT_MODE env var:
+  realtime  (default) — OpenAI Realtime API: single WebSocket, ~300ms latency
+  groq               — Groq LLM + Deepgram STT/TTS: ~600ms latency, cheaper
+
+Key design:
+- book_appointment() function tool → AI calls this directly when lead confirms time
+  (bypasses transcript-based summarization, gives exact ISO datetime)
+- end_call() function tool → AI calls this to auto-disconnect after goodbye
+- Session waits for SIP disconnect OR tool-triggered end, NOT wait_for_inactive()
+  (wait_for_inactive resolves after greeting silence = premature exit)
 """
 
 import asyncio
@@ -11,18 +20,12 @@ import logging
 import os
 import time
 from datetime import datetime
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
 import httpx
 from dotenv import load_dotenv
-from livekit.agents import (
-    Agent,
-    AgentSession,
-    JobContext,
-    WorkerOptions,
-    cli,
-    llm,
-)
+from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli, function_tool
 from livekit.plugins import deepgram, openai, silero
 
 load_dotenv()
@@ -33,71 +36,203 @@ logging.basicConfig(
 )
 logger = logging.getLogger("cortex-agent")
 
-MAX_CALL_S = int(os.getenv("MAX_CALL_DURATION_S", "300"))
-BACKEND_URL = os.getenv("BACKEND_URL", "").rstrip("/")
-VOICE_SECRET = os.getenv("VOICE_SECRET", "")
+AGENT_MODE        = os.getenv("AGENT_MODE", "realtime").lower()   # "realtime" | "groq"
+MAX_CALL_S        = int(os.getenv("MAX_CALL_DURATION_S", "300"))
+VOICE_SERVICE_URL = os.getenv("VOICE_SERVICE_URL", "http://localhost:5000").rstrip("/")
+VOICE_SECRET      = os.getenv("VOICE_SECRET", "")
+LK_HTTP_URL       = (os.getenv("LIVEKIT_URL", "ws://localhost:7880")
+                     .replace("wss://", "https://").replace("ws://", "http://"))
+LK_KEY            = os.getenv("LIVEKIT_API_KEY", "")
+LK_SECRET         = os.getenv("LIVEKIT_API_SECRET", "")
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
+
+import base64
+import hashlib
+import hmac as _hmac
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _lk_token(room: str | None = None) -> str:
+    """Minimal HS256 JWT for LiveKit RoomService calls."""
+    import json as _json
+    header  = _b64url(b'{"alg":"HS256","typ":"JWT"}')
+    video   = {"roomCreate": True, "roomAdmin": True, "roomList": True}
+    if room:
+        video["room"] = room
+    payload = _b64url(_json.dumps({
+        "exp": int(time.time()) + 600,
+        "iss": LK_KEY, "sub": LK_KEY,
+        "video": video,
+    }).encode())
+    sig = _b64url(_hmac.new(LK_SECRET.encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest())
+    return f"{header}.{payload}.{sig}"
+
+
+async def _hang_up_sip(room_name: str, participant_identity: str) -> None:
+    """Remove the SIP participant from the LiveKit room → hangs up the phone."""
+    if not LK_KEY or not LK_SECRET:
+        return
+    url = f"{LK_HTTP_URL}/twirp/livekit.RoomService/RemoveParticipant"
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            res = await client.post(
+                url,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {_lk_token(room=room_name)}",
+                },
+                json={"room": room_name, "identity": participant_identity},
+            )
+        logger.info(f"[hangup] RemoveParticipant {participant_identity} → {res.status_code}")
+    except Exception as exc:
+        logger.error(f"[hangup] {exc}")
+
 
 def get_ist_datetime() -> str:
     now = datetime.now(ZoneInfo("Asia/Kolkata"))
     return now.strftime("%A, %d %B %Y — %H:%M IST")
 
 
-def build_instructions(lead_name: str = "", lead_inquiry: str = "") -> str:
-    name_ctx = f"\nYou are calling {lead_name}." if lead_name else ""
+def build_instructions(
+    lead_name: str = "",
+    lead_inquiry: str = "",
+    mode: str = "groq",
+    tenant_name: str = "",
+) -> str:
+    name_ctx    = f"\nAap {lead_name} ko call kar rahe hain." if lead_name else ""
     inquiry_ctx = (
-        f'\nThey previously enquired about: "{lead_inquiry}". Use this as context.'
+        f'\nUnhone pehle "{lead_inquiry}" ke baare mein enquiry ki thi. Is context ka use karein.'
         if lead_inquiry
         else ""
     )
+    greeting_name = lead_name if lead_name and lead_name.lower() not in ("there", "customer", "") else "aap"
+    biz           = tenant_name if tenant_name else "hamaari company"
+    opening = (
+        f'\nIMPORTANT: Sabse pehle yeh greeting bolein aur RUKO — user ke jawab ka intezaar karo: '
+        f'"Namaste {greeting_name} ji, main {biz} se baat kar raha hoon — kya aapke paas ek minute hai?" '
+        f'Greeting ke baad BILKUL CHUP raho. User jabtak kuch na bole, aap kuch mat bolo.'
+        if mode == "realtime"
+        else ""
+    )
     return f"""\
-You are a friendly, professional AI sales assistant calling on behalf of a business using CortexFlow CRM.{name_ctx}{inquiry_ctx}
+Aap {biz} ke liye ek friendly aur professional AI sales assistant hain.{name_ctx}{inquiry_ctx}{opening}
 
-Your role:
-1. Confirm the prospect is available to talk
-2. Reference their inquiry (if known) or briefly explain how the business can help
-3. Ask 1-2 qualifying questions about their needs
-4. If interested, book an appointment — get a SPECIFIC day AND time from them
-5. Keep each response to 1-2 short sentences — phone-conversation pace
-6. Be warm and natural. Mix Hinglish if they do.
-7. Wrap up graciously when they say goodbye
+Aapka role:
+1. Confirm karein ki prospect available hai baat karne ke liye
+2. Unki inquiry ka reference dein (agar pata ho) ya briefly explain karein ki business kaise help kar sakta hai
+3. 1-2 qualifying questions poochhein unki needs ke baare mein
+4. Agar interested hain, appointment book karein — SPECIFIC din aur TIME poochhein
+5. Har response 1-2 short sentences mein rakhein — phone conversation ki speed mein
+6. Warm aur natural raho — Hindi/Hinglish mein baat karo
+7. Jab woh goodbye bolein, gracefully wrap up karo aur end_call() tool call karo
 
 Current date and time: {get_ist_datetime()}
 
-Scheduling rules (CRITICAL):
-- When booking: ask for day AND clock time. Confirm back: "So I'll book you for [day] at [time] IST — does that work?"
-- Once confirmed: say "Perfect, I've noted it — you'll see it on the calendar" then close
-- Max 30 words per response. Spoken words only — no markdown, no lists."""
+LANGUAGE RULE: Default Hindi/Hinglish mein baat karo. Agar caller English mein baat kare, to English mein jawab do. Caller ki language follow karo.
+
+APPOINTMENT BOOKING (CRITICAL):
+- Jab din aur time confirm ho jaye, TURANT book_appointment() tool call karo correct ISO datetime ke saath
+- Pehle confirm karo: "To main aapko [din] ko [time] IST ke liye book kar raha hoon — theek hai?"
+- Confirmation ke baad: "Perfect, CRM calendar mein note ho gaya" — phir end_call() call karo
+
+CALL ENDING (CRITICAL):
+- Jab bhi conversation complete ho (appointment booked ho ya lead ne goodbye kaha), TURANT end_call() tool call karo
+- Max 30 words per response. Sirf spoken words — no markdown, no lists."""
 
 
 # ─── agent class ──────────────────────────────────────────────────────────────
 
 class CortexFlowAgent(Agent):
-    def __init__(self, lead_name: str, instructions: str):
-        super().__init__(
-            instructions=instructions,
-            allow_interruptions=True,
-            min_endpointing_delay=0.25,
-            max_endpointing_delay=1.2,
-        )
-        self._lead_name = lead_name
-        self._greeting = (
-            f"Hi {lead_name}, CortexFlow here — got a minute?"
-            if lead_name and lead_name.lower() not in ("there", "customer", "")
-            else "Hi there, CortexFlow here — got a minute?"
-        )
+    def __init__(
+        self,
+        lead_name: str,
+        instructions: str,
+        mode: str = "groq",
+        tenant_name: str = "",
+    ):
+        super().__init__(instructions=instructions)
+        self._lead_name   = lead_name
+        self._tenant_name = tenant_name
+        self._mode        = mode
+        self._appointment: dict | None  = None
+        self._outcome: str              = "unknown"
+        self._done        = asyncio.Event()  # set when agent calls end_call()
 
     async def on_enter(self) -> None:
-        await self.session.say(self._greeting, allow_interruptions=True)
+        if self._mode == "realtime":
+            self.session.generate_reply()
+        else:
+            greeting_name = (
+                self._lead_name
+                if self._lead_name and self._lead_name.lower() not in ("there", "customer", "")
+                else "aap"
+            )
+            biz = self._tenant_name if self._tenant_name else "hamaari company"
+            await self.session.say(
+                f"Namaste {greeting_name} ji, main {biz} se baat kar raha hoon — kya aapke paas ek minute hai?",
+                allow_interruptions=True,
+            )
+
+    @function_tool
+    async def book_appointment(
+        self,
+        appointment_iso: Annotated[
+            str,
+            "Confirmed appointment date-time in ISO 8601 +05:30 format. "
+            "Example: '2026-04-20T19:00:00+05:30'. Calculate from what the lead said.",
+        ],
+        notes: Annotated[str, "Optional notes about the appointment"] = "",
+    ) -> str:
+        """Book an appointment for the lead in CRM. Call this as soon as the customer
+        confirms a SPECIFIC date AND time. This saves it directly to the calendar."""
+        self._appointment = {"iso": appointment_iso, "notes": notes}
+        self._outcome     = "appointment_booked"
+        logger.info(f"[tool:book_appointment] iso={appointment_iso} notes={notes!r}")
+        return "Appointment CRM mein save ho gaya."
+
+    @function_tool
+    async def end_call(
+        self,
+        outcome: Annotated[
+            str,
+            "Call outcome. Choose one of: 'interested', 'not_interested', "
+            "'appointment_booked', 'callback', 'unknown'",
+        ] = "unknown",
+    ) -> str:
+        """End the call. Call this when: appointment is booked and confirmed,
+        or the lead said goodbye, or the lead is not interested.
+        IMPORTANT: Call this ONLY after you have fully spoken your farewell sentence."""
+        if self._outcome == "unknown":
+            self._outcome = outcome
+        logger.info(f"[tool:end_call] outcome={self._outcome}")
+
+        # Delay before signalling done so the AI can finish speaking the farewell.
+        # The tool return value ("Theek hai...") is spoken first, then after
+        # HANGUP_DELAY_S seconds the call is disconnected.
+        async def _schedule_hangup() -> None:
+            await asyncio.sleep(4)  # 4 s: enough for TTS + 2-s buffer
+            self._done.set()
+
+        asyncio.create_task(_schedule_hangup())
+        return "Theek hai, aapka samay dene ke liye shukriya. Aapka din shubh ho!"
 
 
-# ─── call result ──────────────────────────────────────────────────────────────
+# ─── call result helpers ───────────────────────────────────────────────────────
 
 async def summarize_call(transcript: str, call_id: str) -> dict:
+    """Fallback summarizer for non-appointment calls or when tools weren't used."""
     if not transcript.strip():
-        return {"summary": "", "outcome": "unknown", "appointment_requested": False, "proposed_appointment_iso": None}
+        return {
+            "summary": "",
+            "outcome": "unknown",
+            "appointment_requested": False,
+            "proposed_appointment_iso": None,
+        }
     try:
         from openai import AsyncOpenAI  # noqa: PLC0415
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
@@ -112,8 +247,8 @@ async def summarize_call(transcript: str, call_id: str) -> dict:
 
 Call time: {now_ist}
 Rules for proposed_appointment_iso:
-- If the customer confirmed a SPECIFIC day AND time, calculate the ISO 8601 +05:30 datetime
-- "tomorrow at 1 PM" when today is Monday 20 Apr 2026 → "2026-04-21T13:00:00+05:30"
+- Only set if customer confirmed SPECIFIC day AND time (calculate ISO 8601 +05:30)
+- "aaj shaam 7 baje" when today is Monday 20 Apr 2026 → "2026-04-20T19:00:00+05:30"
 - Set null if no concrete appointment was confirmed
 
 Transcript:
@@ -128,7 +263,12 @@ Transcript:
         return json.loads(resp.choices[0].message.content)
     except Exception as exc:
         logger.error(f"[summarize:{call_id}] {exc}")
-        return {"summary": "", "outcome": "unknown", "appointment_requested": False, "proposed_appointment_iso": None}
+        return {
+            "summary": "",
+            "outcome": "unknown",
+            "appointment_requested": False,
+            "proposed_appointment_iso": None,
+        }
 
 
 async def notify_backend(
@@ -139,23 +279,20 @@ async def notify_backend(
     duration_s: int,
     summary_data: dict,
 ) -> None:
-    if not BACKEND_URL:
-        logger.warning("[notify] BACKEND_URL not set — skipping")
-        return
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             res = await client.post(
-                f"{BACKEND_URL}/v1/calls/result",
+                f"{VOICE_SERVICE_URL}/voice/call-result",
                 headers={"Content-Type": "application/json", "x-voice-secret": VOICE_SECRET},
                 json={
-                    "tenant_id": tenant_id,
-                    "lead_id": lead_id,
-                    "call_id": call_id,
-                    "transcript": transcript,
-                    "summary": summary_data.get("summary", ""),
-                    "outcome": summary_data.get("outcome", "unknown"),
-                    "duration_seconds": duration_s,
-                    "appointment_requested": bool(summary_data.get("appointment_requested", False)),
+                    "tenant_id":               tenant_id,
+                    "lead_id":                 lead_id,
+                    "call_id":                 call_id,
+                    "transcript":              transcript,
+                    "summary":                 summary_data.get("summary", ""),
+                    "outcome":                 summary_data.get("outcome", "unknown"),
+                    "duration_seconds":        duration_s,
+                    "appointment_requested":   bool(summary_data.get("appointment_requested", False)),
                     "proposed_appointment_iso": summary_data.get("proposed_appointment_iso"),
                 },
             )
@@ -164,70 +301,8 @@ async def notify_backend(
         logger.error(f"[notify:{call_id}] {exc}")
 
 
-# ─── entrypoint ───────────────────────────────────────────────────────────────
-
-async def entrypoint(ctx: JobContext) -> None:
-    logger.info(f"[cortex-agent] job received room={ctx.room.name}")
-
-    metadata: dict = {}
-    try:
-        metadata = json.loads(ctx.room.metadata or "{}")
-    except Exception:
-        pass
-
-    lead_name: str = metadata.get("name", "")
-    lead_id: str = metadata.get("lead_id", "")
-    tenant_id: str = metadata.get("tenant_id", "")
-    lead_inquiry: str = metadata.get("inquiry", "")
-    call_id: str = metadata.get("call_id", ctx.room.name)
-
-    logger.info(f"[agent:{call_id}] lead_id={lead_id} name={lead_name!r}")
-
-    await ctx.connect()
-
-    session = AgentSession(
-        vad=silero.VAD.load(),
-        stt=deepgram.STT(
-            model=os.getenv("DEEPGRAM_MODEL", "nova-2"),
-            language=os.getenv("DEEPGRAM_LANGUAGE", "en-IN"),
-            interim_results=True,
-            endpointing_ms=int(os.getenv("DEEPGRAM_ENDPOINTING_MS", "250")),
-            no_delay=True,
-        ),
-        llm=openai.LLM(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        ),
-        tts=deepgram.TTS(
-            model=os.getenv("DEEPGRAM_TTS_MODEL", "aura-2-harmonia-en"),
-        ),
-        allow_interruptions=True,
-        min_endpointing_delay=0.25,
-        max_endpointing_delay=1.2,
-    )
-
-    agent = CortexFlowAgent(
-        lead_name=lead_name,
-        instructions=build_instructions(lead_name, lead_inquiry),
-    )
-
-    started_at = time.monotonic()
-
-    # Start session — agent.on_enter() fires, greeting goes out
-    await session.start(agent, room=ctx.room)
-    logger.info(f"[agent:{call_id}] session started")
-
-    # Wait until call ends or timeout
-    try:
-        await asyncio.wait_for(session.wait_for_inactive(), timeout=MAX_CALL_S)
-    except asyncio.TimeoutError:
-        logger.info(f"[agent:{call_id}] max duration reached, closing")
-        await session.aclose()
-
-    duration_s = int(time.monotonic() - started_at)
-    logger.info(f"[agent:{call_id}] ended duration={duration_s}s")
-
-    # Build transcript from chat history
-    transcript_lines: list[str] = []
+def _build_transcript(session: AgentSession, extra_lines: list[str] | None = None) -> str:
+    lines: list[str] = []
     for msg in session.history.messages():
         role_label = None
         if msg.role == "user":
@@ -245,17 +320,159 @@ async def entrypoint(ctx: JobContext) -> None:
                 )
             )
             if content.strip():
-                transcript_lines.append(f"{role_label}: {content.strip()}")
+                lines.append(f"{role_label}: {content.strip()}")
+    if extra_lines:
+        lines.extend(extra_lines)
+    return "\n".join(lines)
 
-    transcript = "\n".join(transcript_lines)
-    summary_data = await summarize_call(transcript, call_id)
+
+# ─── session factory ───────────────────────────────────────────────────────────
+
+def _make_session(call_id: str) -> AgentSession:
+    if AGENT_MODE == "realtime":
+        logger.info(f"[agent:{call_id}] mode=realtime (OpenAI Realtime API)")
+        from livekit.plugins.openai import realtime as lk_realtime  # noqa: PLC0415
+        return AgentSession(
+            llm=lk_realtime.RealtimeModel(
+                model=os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview"),
+                voice=os.getenv("OPENAI_REALTIME_VOICE", "shimmer"),
+                api_key=os.getenv("OPENAI_API_KEY"),
+                temperature=0.8,
+            )
+        )
+
+    logger.info(f"[agent:{call_id}] mode=groq (Groq LLM + Deepgram)")
+    return AgentSession(
+        vad=silero.VAD.load(),
+        stt=deepgram.STT(
+            model=os.getenv("DEEPGRAM_MODEL", "nova-2"),
+            language=os.getenv("DEEPGRAM_LANGUAGE", "hi"),       # Hindi-first
+            interim_results=True,
+            endpointing_ms=int(os.getenv("DEEPGRAM_ENDPOINTING_MS", "250")),
+            no_delay=True,
+        ),
+        llm=openai.LLM(
+            model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            base_url="https://api.groq.com/openai/v1",
+            api_key=os.getenv("GROQ_API_KEY"),
+        ),
+        tts=deepgram.TTS(
+            model=os.getenv("DEEPGRAM_TTS_MODEL", "aura-2-harmonia-en"),
+        ),
+        allow_interruptions=True,
+        min_endpointing_delay=0.25,
+        max_endpointing_delay=1.2,
+    )
+
+
+# ─── entrypoint ───────────────────────────────────────────────────────────────
+
+async def entrypoint(ctx: JobContext) -> None:
+    logger.info(f"[cortex-agent] job received room={ctx.room.name}")
+
+    # Connect first — room.metadata is populated after the WebSocket handshake
+    await ctx.connect()
+
+    def _parse_meta(s: str | None) -> dict:
+        try:
+            return json.loads(s or "{}") if s else {}
+        except Exception:
+            return {}
+
+    room_meta = _parse_meta(ctx.room.metadata)
+    job_meta  = _parse_meta(ctx.job.metadata if hasattr(ctx, "job") and ctx.job else None)
+    metadata  = {**job_meta, **room_meta}
+
+    lead_name: str    = metadata.get("name", "")
+    lead_id: str      = metadata.get("lead_id", "")
+    tenant_id: str    = metadata.get("tenant_id", "")
+    tenant_name: str  = metadata.get("tenant_name", "")
+    lead_inquiry: str = metadata.get("inquiry", "")
+    raw_room          = ctx.room.name
+    call_id: str      = metadata.get(
+        "call_id",
+        raw_room.removeprefix("call-") if raw_room.startswith("call-") else raw_room,
+    )
+    sip_identity      = f"sip-{call_id}"   # matches livekitBridge.ts participant_identity
+
+    logger.info(f"[agent:{call_id}] lead_id={lead_id} name={lead_name!r} tenant={tenant_name!r}")
+
+    session = _make_session(call_id)
+    agent   = CortexFlowAgent(
+        lead_name=lead_name,
+        instructions=build_instructions(lead_name, lead_inquiry, mode=AGENT_MODE, tenant_name=tenant_name),
+        mode=AGENT_MODE,
+        tenant_name=tenant_name,
+    )
+
+    started_at = time.monotonic()
+    await session.start(agent, room=ctx.room)
+    logger.info(f"[agent:{call_id}] session started")
+
+    # ── Wait for SIP participant disconnect (user hangs up) ──────────────────
+    # Using wait_for_inactive() causes premature exit after the greeting silence.
+    # Instead we watch for the SIP participant to leave OR the agent to call end_call().
+    sip_disconnected = asyncio.Event()
+
+    def _on_participant_disconnect(participant: any) -> None:
+        if participant.identity.startswith("sip-"):
+            logger.info(f"[agent:{call_id}] SIP participant disconnected")
+            sip_disconnected.set()
+
+    ctx.room.on("participant_disconnected", _on_participant_disconnect)
+
+    try:
+        done_tasks, pending = await asyncio.wait(
+            [
+                asyncio.create_task(agent._done.wait()),        # agent said goodbye
+                asyncio.create_task(sip_disconnected.wait()),   # user hung up
+            ],
+            timeout=MAX_CALL_S,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    except Exception:
+        done_tasks, pending = set(), set()
+
+    for t in pending:
+        t.cancel()
+
+    duration_s = int(time.monotonic() - started_at)
+    logger.info(f"[agent:{call_id}] ended duration={duration_s}s outcome={agent._outcome}")
+
+    # If agent triggered end_call(), remove SIP participant to hang up the phone.
+    # session.aclose() is NOT called here — the Realtime session stays alive
+    # long enough for the AI to finish speaking its farewell (4-s delay is
+    # baked into end_call() before _done is set).
+    if agent._done.is_set():
+        await _hang_up_sip(raw_room, sip_identity)
+
+    # ── Build summary from tool results (reliable) + transcript fallback ─────
+    if agent._appointment:
+        # book_appointment() was called — use exact ISO, no summarizer needed
+        summary_data: dict = {
+            "summary": (
+                f"Appointment booked: {agent._appointment['iso']}"
+                + (f" — {agent._appointment['notes']}" if agent._appointment.get("notes") else "")
+            ),
+            "outcome":                 "appointment_booked",
+            "appointment_requested":   True,
+            "proposed_appointment_iso": agent._appointment["iso"],
+        }
+    else:
+        transcript   = _build_transcript(session)
+        summary_data = await summarize_call(transcript, call_id)
+        if agent._outcome != "unknown":
+            summary_data["outcome"] = agent._outcome
+
+    transcript = _build_transcript(session)
     await notify_backend(call_id, lead_id, tenant_id, transcript, duration_s, summary_data)
 
 
 # ─── worker ───────────────────────────────────────────────────────────────────
 
 def prewarm(proc) -> None:
-    silero.VAD.load()
+    if AGENT_MODE != "realtime":
+        silero.VAD.load()
 
 
 if __name__ == "__main__":
@@ -263,5 +480,6 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
+            agent_name="cortex-agent",
         )
     )

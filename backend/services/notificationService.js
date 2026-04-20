@@ -198,6 +198,125 @@ async function logCommunication(leadId, entry) {
 }
 
 /**
+ * Fetch admin contact (email + phone) for a tenant.
+ * Falls back to global config if tenant has no settings.
+ */
+async function getAdminContact(tenantId) {
+  try {
+    const result = await db.query('SELECT settings FROM tenants WHERE id = $1', [tenantId]);
+    const settings = result.rows[0]?.settings || {};
+    return {
+      adminEmail: settings.admin_email || config.adminEmail,
+      adminPhone: settings.admin_phone || config.adminPhone,
+    };
+  } catch {
+    return { adminEmail: config.adminEmail, adminPhone: config.adminPhone };
+  }
+}
+
+/**
+ * Format an ISO date string into readable Indian locale string.
+ */
+function fmtDate(iso) {
+  if (!iso) return 'the scheduled time';
+  try {
+    return new Date(iso).toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'long',
+      timeStyle: 'short',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+/**
+ * Fires when AI call books an appointment.
+ * Sends WhatsApp + Email to both admin and lead.
+ */
+async function sendAppointmentBookedNotifications({ tenantId, lead, appointmentIso }) {
+  const { adminEmail, adminPhone } = await getAdminContact(tenantId);
+  const leadName    = lead.name    || 'Lead';
+  const leadPhone   = lead.phone   || '';
+  const leadEmail   = lead.email   || null;
+  const dateLabel   = fmtDate(appointmentIso);
+
+  const adminWaBody = `📅 Appointment Booked!\nLead: ${leadName}\nPhone: ${leadPhone}\nDate & Time: ${dateLabel}\n\nBooked automatically via AI call.`;
+
+  const leadWaBody  = `Hi ${leadName}! 🎉 Your appointment has been confirmed for ${dateLabel}. Please keep this time free — our team looks forward to connecting with you!`;
+
+  const adminEmailHtml = `
+    <h2>📅 Appointment Booked</h2>
+    <p>An appointment was successfully booked via AI call.</p>
+    <table cellpadding="6" style="border-collapse:collapse;">
+      <tr><td><strong>Lead Name</strong></td><td>${leadName}</td></tr>
+      <tr><td><strong>Phone</strong></td><td>${leadPhone}</td></tr>
+      <tr><td><strong>Email</strong></td><td>${leadEmail || 'N/A'}</td></tr>
+      <tr><td><strong>Appointment</strong></td><td>${dateLabel}</td></tr>
+    </table>
+    <p style="margin-top:16px;color:#6b7280;font-size:13px;">Log in to your CRM to view or reschedule this appointment.</p>
+  `;
+
+  const leadEmailHtml = `
+    <h2>Your Appointment is Confirmed! 🎉</h2>
+    <p>Hi ${leadName},</p>
+    <p>We're pleased to confirm your appointment for <strong>${dateLabel}</strong>.</p>
+    <p>Please make sure you're available at that time. We'll send you a reminder closer to the date.</p>
+    <br/>
+    <p>Looking forward to speaking with you!</p>
+  `;
+
+  const tasks = [
+    sendWhatsApp({ tenantId, to: adminPhone, body: adminWaBody }),
+    sendEmail({ tenantId, to: adminEmail, subject: `📅 Appointment Booked – ${leadName}`, html: adminEmailHtml }),
+  ];
+  if (leadPhone) tasks.push(sendWhatsApp({ tenantId, to: leadPhone, body: leadWaBody }));
+  if (leadEmail) tasks.push(sendEmail({ tenantId, to: leadEmail, subject: 'Your Appointment is Confirmed!', html: leadEmailHtml }));
+
+  const results = await Promise.allSettled(tasks);
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') console.error(`[appt-notify] task ${i} failed:`, r.reason?.message || r.reason);
+  });
+
+  const logEntries = [
+    { type: 'whatsapp', direction: 'to_admin', message: adminWaBody.slice(0, 120), status: results[0].status },
+    { type: 'email',    direction: 'to_admin', subject: `Appointment Booked – ${leadName}`, status: results[1].status },
+  ];
+  if (leadPhone) logEntries.push({ type: 'whatsapp', direction: 'to_lead', message: leadWaBody.slice(0, 120), status: results[2]?.status || 'skipped' });
+  if (leadEmail) logEntries.push({ type: 'email',    direction: 'to_lead', subject: 'Appointment Confirmed', status: results[leadPhone ? 3 : 2]?.status || 'skipped' });
+
+  if (lead.id) logCommunications(lead.id, logEntries).catch(() => {});
+}
+
+/**
+ * Fires when AI call outcome is 'callback'.
+ * Sends WhatsApp ONLY (no email) to both admin and lead.
+ */
+async function sendCallbackNotifications({ tenantId, lead }) {
+  const { adminPhone } = await getAdminContact(tenantId);
+  const leadName  = lead.name  || 'Lead';
+  const leadPhone = lead.phone || '';
+
+  const adminWaBody = `🔔 Callback Requested!\nLead: ${leadName}\nPhone: ${leadPhone}\n\nThey asked to be called back. Please follow up at your earliest convenience.`;
+  const leadWaBody  = `Hi ${leadName}! 👋 We noted that you'd like a callback. Our team will reach out to you shortly. Thank you for your patience!`;
+
+  const tasks = [sendWhatsApp({ tenantId, to: adminPhone, body: adminWaBody })];
+  if (leadPhone) tasks.push(sendWhatsApp({ tenantId, to: leadPhone, body: leadWaBody }));
+
+  const results = await Promise.allSettled(tasks);
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') console.error(`[callback-notify] task ${i} failed:`, r.reason?.message || r.reason);
+  });
+
+  const logEntries = [
+    { type: 'whatsapp', direction: 'to_admin', message: adminWaBody.slice(0, 120), status: results[0].status },
+  ];
+  if (leadPhone) logEntries.push({ type: 'whatsapp', direction: 'to_lead', message: leadWaBody.slice(0, 120), status: results[1]?.status || 'skipped' });
+
+  if (lead.id) logCommunications(lead.id, logEntries).catch(() => {});
+}
+
+/**
  * Send appointment reminder via WhatsApp.
  */
 async function sendAppointmentReminder({ tenantId, lead, hoursUntil }) {
@@ -217,7 +336,10 @@ module.exports = {
   sendEmail,
   sendWhatsApp,
   sendLeadEntryNotifications,
+  sendAppointmentBookedNotifications,
+  sendCallbackNotifications,
   sendAppointmentReminder,
   logCommunication,
   logCommunications,
+  getAdminContact,
 };

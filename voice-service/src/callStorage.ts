@@ -93,6 +93,13 @@ interface SaveResultParams {
   proposed_appointment_iso?: string | null;
 }
 
+interface UpdateLeadParams {
+  lead_id: string;
+  outcome: string;
+  appointment_requested: boolean;
+  proposed_appointment_iso?: string | null;
+}
+
 export const callStorage = {
   async createCall(params: CreateCallParams) {
     const pool = await getPool();
@@ -152,6 +159,54 @@ export const callStorage = {
         }),
       ]
     );
+  },
+
+  /**
+   * Update lead metadata and status after a call completes.
+   * - Always marks ai_call_status = 'called'
+   * - If appointment booked: sets appointment_date + appointment_status = 'Scheduled'
+   *   and promotes lead status to 'appointment'
+   * - If interested (no appt): promotes 'new' leads to 'contacted'
+   */
+  async updateLeadAfterCall(params: UpdateLeadParams) {
+    if (!params.lead_id) return;
+    const pool = await getPool();
+    const { lead_id, outcome, appointment_requested, proposed_appointment_iso } = params;
+
+    const metaPatch: Record<string, string> = { ai_call_status: 'called' };
+    let statusClause = '';
+
+    if (appointment_requested && proposed_appointment_iso) {
+      metaPatch.appointment_date  = proposed_appointment_iso;
+      metaPatch.appointment_status = 'Scheduled';
+      // Promote status to 'appointment' unless it's already at a later stage
+      statusClause = `, status = CASE WHEN status IN ('new','contacted','qualified') THEN 'appointment' ELSE status END`;
+    } else if (outcome === 'interested') {
+      statusClause = `, status = CASE WHEN status = 'new' THEN 'contacted' ELSE status END`;
+    }
+
+    await queryWithTimeout('updateLeadAfterCall', () =>
+      pool.query(
+        `UPDATE leads
+         SET metadata   = COALESCE(metadata, '{}') || $2::jsonb,
+             updated_at = NOW()${statusClause}
+         WHERE id = $1`,
+        [lead_id, JSON.stringify(metaPatch)]
+      )
+    );
+  },
+
+  async getTenantName(tenantId: string): Promise<string> {
+    if (!tenantId) return '';
+    try {
+      const pool = await getPool();
+      const result = await queryWithTimeout('getTenantName', () =>
+        pool.query('SELECT name FROM tenants WHERE id = $1 LIMIT 1', [tenantId])
+      );
+      return (result.rows[0]?.name as string) || '';
+    } catch {
+      return '';
+    }
   },
 
   async logEvent(callId: string, eventType: string, data: object) {

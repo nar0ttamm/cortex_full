@@ -21,16 +21,29 @@ function b64url(buf: Buffer | string): string {
   return b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
-function makeLivekitToken(): string {
+/**
+ * Each LiveKit service requires different JWT grants:
+ *   RoomService/CreateRoom          → video.roomCreate + video.roomAdmin
+ *   AgentDispatchService/CreateDispatch → video.roomAdmin + video.room (scoped to the room)
+ *   SIPService/CreateSIPParticipant → sip.admin
+ */
+function makeLivekitToken(opts: { room?: string; sipCall?: boolean } = {}): string {
   const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = b64url(
-    JSON.stringify({
-      exp: Math.floor(Date.now() / 1000) + 600,
-      iss: LK_KEY,
-      sub: LK_KEY,
-      video: { roomCreate: true, roomAdmin: true, roomList: true },
-    })
-  );
+
+  // Video grants: always include roomCreate+roomAdmin; scope to room when provided
+  const video: Record<string, unknown> = { roomCreate: true, roomAdmin: true, roomList: true };
+  if (opts.room) video.room = opts.room;
+
+  const claims: Record<string, unknown> = {
+    exp: Math.floor(Date.now() / 1000) + 600,
+    iss: LK_KEY,
+    sub: LK_KEY,
+    video,
+  };
+  // SIP participant creation needs sip.call (per livekit-api SDK SIPGrants)
+  if (opts.sipCall) claims.sip = { call: true };
+
+  const payload = b64url(JSON.stringify(claims));
   const data = `${header}.${payload}`;
   const sig = b64url(createHmac('sha256', LK_SECRET).update(data).digest());
   return `${data}.${sig}`;
@@ -38,14 +51,16 @@ function makeLivekitToken(): string {
 
 // ── LiveKit Twirp API calls ─────────────────────────────────────────────────
 
-async function lkCall(service: string, method: string, body: object): Promise<any> {
+async function lkCall(
+  service: string,
+  method: string,
+  body: object,
+  token: string = makeLivekitToken(),
+): Promise<any> {
   const url = `${LK_HTTP_URL}/twirp/livekit.${service}/${method}`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${makeLivekitToken()}`,
-    },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
   const text = await res.text();
@@ -64,18 +79,20 @@ export async function startLivekitCall(params: {
   inquiry: string;
   leadId: string;
   tenantId: string;
+  tenantName?: string;
 }): Promise<void> {
-  const { callId, phone, name, inquiry, leadId, tenantId } = params;
+  const { callId, phone, name, inquiry, leadId, tenantId, tenantName } = params;
   const roomName = `call-${callId}`;
   const metadata = JSON.stringify({
-    call_id: callId,
-    lead_id: leadId,
-    tenant_id: tenantId,
+    call_id:     callId,
+    lead_id:     leadId,
+    tenant_id:   tenantId,
+    tenant_name: tenantName || '',
     name,
     inquiry,
   });
 
-  // 1. Create the LiveKit room
+  // 1. Create the LiveKit room — generic admin token
   await lkCall('RoomService', 'CreateRoom', {
     name: roomName,
     metadata,
@@ -84,22 +101,26 @@ export async function startLivekitCall(params: {
   });
   console.log(`[livekitBridge] room created: ${roomName}`);
 
-  // 2. Dispatch the AI agent worker to the room
-  await lkCall('AgentDispatchService', 'CreateDispatch', {
-    room_name: roomName,
-    metadata,
-    agent_name: 'cortex-agent',
-  });
+  // 2. Dispatch the AI agent — room-scoped token required by AgentDispatchService
+  await lkCall(
+    'AgentDispatchService', 'CreateDispatch',
+    { room: roomName, metadata, agent_name: 'cortex-agent' },
+    makeLivekitToken({ room: roomName }),
+  );
   console.log(`[livekitBridge] agent dispatched to ${roomName}`);
 
-  // 3. Create an outbound SIP participant (dials via Telnyx)
-  await lkCall('SIPService', 'CreateSIPParticipant', {
-    sip_trunk_id: LK_TRUNK,
-    sip_call_to: phone,
-    room_name: roomName,
-    participant_identity: `sip-${callId}`,
-    participant_name: name || 'Lead',
-    play_dialtone: true,
-  });
+  // 3. Dial via SIP — service name is "SIP" (not "SIPService"); grant is sip.call
+  await lkCall(
+    'SIP', 'CreateSIPParticipant',
+    {
+      sip_trunk_id: LK_TRUNK,
+      sip_call_to: phone,
+      room_name: roomName,
+      participant_identity: `sip-${callId}`,
+      participant_name: name || 'Lead',
+      play_dialtone: true,
+    },
+    makeLivekitToken({ room: roomName, sipCall: true }),
+  );
   console.log(`[livekitBridge] SIP participant created for ${phone}`);
 }
