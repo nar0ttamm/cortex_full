@@ -3,6 +3,7 @@ import { freeswitchBridge } from './freeswitchBridge';
 import { callStorage } from './callStorage';
 import { notifyBackendCallResult } from './backendNotify';
 import { v4 as uuidv4 } from 'uuid';
+import { isLivekitConfigured, startLivekitCall } from './livekitBridge';
 
 function requireVoiceSecret(req: Request, res: Response): boolean {
   const secret = process.env.VOICE_SECRET;
@@ -45,10 +46,32 @@ export const callController = {
       return res.status(500).json({ error: 'Failed to initiate call', details: err.message });
     }
 
-    // Respond immediately so Vercel/backend does not wait for ESL dial (often 10–30s+).
-    // originateCall sets ringing / failed in the background.
+    // Respond immediately so backend does not wait for dial to connect.
     res.json({ status: 'initiated', call_id: callId });
 
+    // ── LiveKit path (new) ─────────────────────────────────────────────────
+    if (isLivekitConfigured()) {
+      void startLivekitCall({
+        callId,
+        phone,
+        name: name || 'Customer',
+        inquiry: call_script || '',
+        leadId: lead_id,
+        tenantId: tenant_id,
+      }).catch(async (err: any) => {
+        console.error('[callController.startCall:livekit]', err.message);
+        try { await callStorage.updateCallStatus(callId, 'failed', err.message); } catch (_) {}
+        await notifyBackendCallResult({
+          tenant_id, lead_id, call_id: callId,
+          outcome: 'dial_failed',
+          summary: err.message || 'LiveKit originate failed',
+          transcript: '', duration_seconds: 0, appointment_requested: false,
+        });
+      });
+      return;
+    }
+
+    // ── Legacy FreeSWITCH/ESL path ─────────────────────────────────────────
     void freeswitchBridge
       .originateCall({
         callId,

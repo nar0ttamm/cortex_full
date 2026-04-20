@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { AppShell } from '../components/AppShell';
 
 import { useTenantId } from '@/app/hooks/useTenantId';
@@ -132,6 +133,7 @@ export default function IntegrationsPage() {
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; msg: string }>>({});
   const [activeTab, setActiveTab] = useState<'connected' | 'add' | 'logs'>('connected');
+  const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchData = async () => {
     if (!tenantId || !API_URL) {
@@ -158,6 +160,15 @@ export default function IntegrationsPage() {
 
   const connect = async (key: string, label: string) => {
     if (!tenantId) return;
+    const ok = window.confirm(
+      `Add “${label}” as a lead source?\n\n` +
+        `• A unique webhook URL and secret will be created for this platform.\n` +
+        `• Incoming payloads are normalized and deduplicated by phone.\n` +
+        `• New leads will trigger your AI call workflow.\n\n` +
+        `Continue?`
+    );
+    if (!ok) return;
+    setBanner(null);
     setConnecting(key);
     try {
       const res = await fetch(`${API_URL}/v1/integrations/${tenantId}`, {
@@ -165,8 +176,20 @@ export default function IntegrationsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ integration_key: key, label }),
       });
-      if (res.ok) { await fetchData(); setActiveTab('connected'); }
-    } catch (_) {}
+      if (res.ok) {
+        setBanner({
+          type: 'success',
+          text: `“${label}” connected. Open the Connected tab to copy your webhook URL and secret.`,
+        });
+        await fetchData();
+        setActiveTab('connected');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setBanner({ type: 'error', text: err.error || `Could not connect (${res.status})` });
+      }
+    } catch (_) {
+      setBanner({ type: 'error', text: 'Network error while connecting.' });
+    }
     setConnecting(null);
   };
 
@@ -221,6 +244,32 @@ export default function IntegrationsPage() {
   return (
     <AppShell title="Integrations" actions={actions}>
       <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+        {banner && (
+          <div
+            className={`rounded-2xl border px-4 py-3 text-sm flex items-start gap-3 ${
+              banner.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800 text-red-900 dark:text-red-200'
+            }`}
+          >
+            {banner.type === 'success' ? (
+              <svg className="w-5 h-5 shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5 shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4M12 16h.01" />
+              </svg>
+            )}
+            <div className="flex-1 min-w-0">
+              <p>{banner.text}</p>
+              <button type="button" onClick={() => setBanner(null)} className="text-xs font-semibold underline mt-2 opacity-80 hover:opacity-100">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Page header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -482,8 +531,17 @@ export default function IntegrationsPage() {
                                   {log.status}
                                 </span>
                               </td>
-                              <td className="py-3 pr-4 font-mono text-xs text-slate-400 dark:text-slate-500">
-                                {log.lead_id ? log.lead_id.slice(0, 8) + '…' : '—'}
+                              <td className="py-3 pr-4 font-mono text-xs">
+                                {log.lead_id ? (
+                                  <Link
+                                    href={`/leads/${log.lead_id}`}
+                                    className="text-teal-600 dark:text-teal-400 hover:underline"
+                                  >
+                                    {log.lead_id.slice(0, 8)}…
+                                  </Link>
+                                ) : (
+                                  <span className="text-slate-400 dark:text-slate-500">—</span>
+                                )}
                               </td>
                               <td className="py-3 pr-4 text-xs text-red-500 max-w-[200px] truncate">
                                 {log.error_message || '—'}
@@ -502,6 +560,53 @@ export default function IntegrationsPage() {
             )}
           </div>
         </div>
+
+        <details className="group bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm overflow-hidden">
+          <summary className="cursor-pointer list-none px-5 py-4 font-semibold text-slate-800 dark:text-slate-100 flex items-center justify-between gap-2 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
+            <span>Advanced: payloads and verification</span>
+            <svg className="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </summary>
+          <div className="px-5 pb-5 pt-0 space-y-4 text-sm text-slate-600 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700">
+            <p>
+              Incoming JSON is normalized automatically: common fields like <code className="text-xs bg-slate-100 dark:bg-slate-900 px-1 rounded">phone</code>,{' '}
+              <code className="text-xs bg-slate-100 dark:bg-slate-900 px-1 rounded">mobile</code>, Meta <code className="text-xs bg-slate-100 dark:bg-slate-900 px-1 rounded">field_data</code>, and Typeform{' '}
+              <code className="text-xs bg-slate-100 dark:bg-slate-900 px-1 rounded">answers</code> are mapped to your lead schema.
+            </p>
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-500 uppercase tracking-wider mb-2">Example body (POST)</p>
+              <pre className="text-xs font-mono bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 overflow-x-auto leading-relaxed">
+{`{
+  "name": "Jane Doe",
+  "phone": "+919876543210",
+  "email": "jane@example.com",
+  "message": "Interested in 2BHK",
+  "source": "Custom webhook"
+}`}
+              </pre>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-500 uppercase tracking-wider mb-2">Secret verification (when a secret exists)</p>
+              <ul className="text-xs space-y-2 list-disc list-inside">
+                <li>
+                  <strong className="text-slate-700 dark:text-slate-300">Bearer</strong>: send{' '}
+                  <code className="bg-slate-100 dark:bg-slate-900 px-1 rounded">Authorization: Bearer …</code> with your revealed secret.
+                </li>
+                <li>
+                  <strong className="text-slate-700 dark:text-slate-300">HMAC</strong>: use header{' '}
+                  <code className="bg-slate-100 dark:bg-slate-900 px-1 rounded">x-hub-signature-256</code>,{' '}
+                  <code className="bg-slate-100 dark:bg-slate-900 px-1 rounded">x-webhook-signature</code>, or{' '}
+                  <code className="bg-slate-100 dark:bg-slate-900 px-1 rounded">x-signature</code> with value{' '}
+                  <code className="bg-slate-100 dark:bg-slate-900 px-1 rounded">sha256=…</code> over the raw JSON body.
+                </li>
+              </ul>
+            </div>
+            <p className="text-xs text-slate-500">
+              Use <strong className="text-slate-700 dark:text-slate-300">Test</strong> on a connected source to confirm end-to-end delivery without posting from your ads tool yet.
+            </p>
+          </div>
+        </details>
       </div>
     </AppShell>
   );

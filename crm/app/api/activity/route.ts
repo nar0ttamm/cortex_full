@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
           message: `New lead: ${lead.name} - ${lead.inquiry || 'No inquiry'}`,
           timestamp: lead.timestamp || new Date().toISOString(),
           leadName: lead.name,
+          leadId: lead.id,
         });
       });
 
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest) {
           message: `Appointment scheduled: ${lead.name} on ${lead.appointment_date}`,
           timestamp: lead.appointment_date || new Date().toISOString(),
           leadName: lead.name,
+          leadId: lead.id,
         });
       });
 

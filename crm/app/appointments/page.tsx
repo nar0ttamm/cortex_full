@@ -145,13 +145,13 @@ export default function AppointmentsPage() {
 
   return (
     <AppShell title="Appointments" actions={actions}>
-      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px] mx-auto">
-        <div className="flex flex-col xl:flex-row gap-6 xl:gap-8">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1600px] mx-auto">
+        <div className="flex flex-col xl:flex-row gap-6 xl:gap-8 xl:items-start">
 
           {/* Calendar — larger on wide screens */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm overflow-hidden w-full xl:w-[min(100%,36rem)] xl:shrink-0">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200/70 dark:border-slate-700 shadow-md shadow-slate-200/40 dark:shadow-none overflow-hidden w-full xl:w-[min(100%,52rem)] xl:shrink-0 ring-1 ring-slate-100/80 dark:ring-slate-700/50">
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+            <div className="flex items-center justify-between px-5 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-700 bg-gradient-to-br from-teal-50/90 via-white to-violet-50/50 dark:from-slate-900 dark:via-slate-800 dark:to-teal-950/30">
               <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -180,7 +180,7 @@ export default function AppointmentsPage() {
             </div>
 
             {/* Grid */}
-            <div className="grid grid-cols-7 p-2 sm:p-3 gap-1 sm:gap-1.5">
+            <div className="grid grid-cols-7 p-3 sm:p-4 gap-1.5 sm:gap-2 bg-slate-50/40 dark:bg-slate-900/20">
               {calDays.map((date, i) => {
                 if (!date) return <div key={i} />;
                 const key = date.toDateString();
@@ -197,7 +197,7 @@ export default function AppointmentsPage() {
                       setSelectedDate(date);
                       setSelectedLead(null);
                     }}
-                    className={`relative flex flex-col items-center justify-start pt-2 pb-2.5 rounded-xl min-h-[3rem] sm:min-h-[3.5rem] transition-all text-sm sm:text-base font-medium
+                    className={`relative flex flex-col items-center justify-start pt-2.5 pb-3 rounded-2xl min-h-[3.75rem] sm:min-h-[4.25rem] transition-all text-sm sm:text-lg font-semibold
                       ${isSelected
                         ? 'bg-teal-500 text-white shadow-md shadow-teal-200'
                         : isToday
@@ -235,15 +235,15 @@ export default function AppointmentsPage() {
           {/* Right panel */}
           <div className="flex-1 min-w-0 space-y-4">
             {/* Selected date header */}
-            <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm px-5 py-4 flex items-center justify-between">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm px-5 py-4 flex items-center justify-between">
               <div>
-                <p className="text-sm font-bold text-slate-800">
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
                   {selectedDate
                     ? selectedDate.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
                     : 'Select a date'}
                 </p>
                 {selectedDate && (
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                     {selectedAppts.length === 0
                       ? 'No appointments'
                       : `${selectedAppts.length} appointment${selectedAppts.length > 1 ? 's' : ''}`}
@@ -280,37 +280,50 @@ export default function AppointmentsPage() {
                   return (
                     <div
                       key={appt.id}
-                      className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all ${
-                        isExpanded ? 'border-teal-300 shadow-teal-100' : 'border-slate-200/70 hover:border-slate-300'
+                      className={`bg-white dark:bg-slate-800 rounded-2xl border shadow-sm overflow-hidden transition-all ${
+                        isExpanded ? 'border-teal-300 dark:border-teal-600 shadow-teal-100 dark:shadow-teal-900/20' : 'border-slate-200/70 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                       }`}
                     >
-                      {/* Card header — always visible */}
-                      <button
-                        onClick={() => setSelectedLead(isExpanded ? null : appt)}
-                        className="w-full flex items-center justify-between px-5 py-4 text-left"
-                      >
-                        <div className="flex items-center gap-3">
+                      {/* Card header — lead opens profile; chevron expands details */}
+                      <div className="flex items-stretch">
+                        <Link
+                          href={`/leads/${appt.id}`}
+                          className="flex-1 flex items-center gap-3 px-5 py-4 min-w-0 text-left hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition-colors"
+                        >
                           <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0
-                            ${isExpanded ? 'bg-teal-500 text-white' : 'bg-teal-50 text-teal-700'}`}>
+                            ${isExpanded ? 'bg-teal-500 text-white' : 'bg-teal-50 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300'}`}>
                             {appt.name?.charAt(0)?.toUpperCase() || '?'}
                           </div>
-                          <div>
-                            <p className="text-sm font-bold text-slate-800">{appt.name}</p>
-                            <p className="text-xs text-slate-400">{apptTime} · {appt.phone}</p>
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{appt.name}</p>
+                            <p className="text-xs text-slate-400 dark:text-slate-500">{apptTime} · {appt.phone}</p>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className={`px-2.5 py-1 text-[10px] font-bold rounded-full border uppercase tracking-wide ${STATUS_COLOR[appt.appointment_status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                        </Link>
+                        <div className="flex items-center gap-2 shrink-0 pr-3 pl-0">
+                          <span className={`hidden sm:inline-flex px-2.5 py-1 text-[10px] font-bold rounded-full border uppercase tracking-wide ${STATUS_COLOR[appt.appointment_status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
                             {appt.appointment_status}
                           </span>
-                          <svg
-                            className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+                          <button
+                            type="button"
+                            onClick={() => setSelectedLead(isExpanded ? null : appt)}
+                            className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-colors"
+                            aria-expanded={isExpanded}
+                            aria-label={isExpanded ? 'Collapse details' : 'Expand details'}
                           >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                          </svg>
+                            <svg
+                              className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                              fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
                         </div>
-                      </button>
+                      </div>
+                      <div className="px-5 pb-3 sm:hidden">
+                        <span className={`inline-flex px-2.5 py-1 text-[10px] font-bold rounded-full border uppercase tracking-wide ${STATUS_COLOR[appt.appointment_status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                          {appt.appointment_status}
+                        </span>
+                      </div>
 
                       {/* Expanded detail */}
                       {isExpanded && (
@@ -347,8 +360,8 @@ export default function AppointmentsPage() {
 
             {/* Upcoming summary */}
             {leads.length > 0 && (
-              <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5">
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm p-5">
+                <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                   <span className="w-1 h-4 bg-teal-500 rounded-full" />
                   All Upcoming
                 </h3>
@@ -361,29 +374,48 @@ export default function AppointmentsPage() {
                       const d = new Date(l.appointment_date);
                       const isOnSelected = selectedDate ? isSameDay(d, selectedDate) : false;
                       return (
-                        <button
+                        <div
                           key={l.id}
-                          onClick={() => {
-                            setSelectedDate(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
-                            setViewMonth(new Date(d.getFullYear(), d.getMonth(), 1));
-                            setSelectedLead(l);
-                          }}
-                          className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-left transition-colors ${
-                            isOnSelected ? 'bg-teal-50 border border-teal-100' : 'hover:bg-slate-50'
+                          className={`flex items-stretch gap-1 rounded-xl border transition-colors ${
+                            isOnSelected
+                              ? 'bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800'
+                              : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-700/40'
                           }`}
                         >
-                          <div className="text-center shrink-0 w-10">
-                            <p className="text-[10px] font-semibold text-slate-400 uppercase leading-none">{MONTHS[d.getMonth()].slice(0,3)}</p>
-                            <p className="text-lg font-bold text-slate-800 leading-tight">{d.getDate()}</p>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-slate-800 truncate">{l.name}</p>
-                            <p className="text-xs text-slate-400">{d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</p>
-                          </div>
-                          <span className={`shrink-0 px-2 py-0.5 text-[10px] font-bold rounded-full border uppercase ${STATUS_COLOR[l.appointment_status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                            {l.appointment_status}
-                          </span>
-                        </button>
+                          <Link
+                            href={`/leads/${l.id}`}
+                            className="flex-1 flex items-center gap-3 px-3.5 py-2.5 min-w-0 text-left rounded-l-xl"
+                          >
+                            <div className="text-center shrink-0 w-10">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase leading-none">{MONTHS[d.getMonth()].slice(0,3)}</p>
+                              <p className="text-lg font-bold text-slate-800 dark:text-slate-100 leading-tight">{d.getDate()}</p>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{l.name}</p>
+                              <p className="text-xs text-slate-400">{d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</p>
+                            </div>
+                            <span className={`shrink-0 px-2 py-0.5 text-[10px] font-bold rounded-full border uppercase hidden sm:inline-flex ${STATUS_COLOR[l.appointment_status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                              {l.appointment_status}
+                            </span>
+                          </Link>
+                          <button
+                            type="button"
+                            title="Show on calendar"
+                            onClick={() => {
+                              setSelectedDate(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+                              setViewMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+                              setSelectedLead(l);
+                            }}
+                            className="shrink-0 px-2.5 rounded-r-xl border-l border-slate-100 dark:border-slate-600 text-slate-400 hover:text-teal-600 dark:hover:text-teal-400 hover:bg-white/60 dark:hover:bg-slate-600/50 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                              <rect x="3" y="4" width="18" height="18" rx="2" />
+                              <line x1="16" y1="2" x2="16" y2="6" />
+                              <line x1="8" y1="2" x2="8" y2="6" />
+                              <line x1="3" y1="10" x2="21" y2="10" />
+                            </svg>
+                          </button>
+                        </div>
                       );
                     })}
                 </div>

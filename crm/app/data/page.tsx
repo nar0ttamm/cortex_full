@@ -24,9 +24,32 @@ export default function DataManagementPage() {
     source: 'Manual Entry',
   });
 
+  const downloadCsvTemplate = () => {
+    const header = 'name,phone,email,inquiry,source';
+    const example =
+      '"Jane Doe","+919876543210","jane@example.com","2BHK in Indiranagar","CSV Import"';
+    const csv = `${header}\n${example}\n`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'leads-import-template.csv';
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    if (
+      !window.confirm(
+        `Import leads from “${file.name}”?\n\nExisting rows are not deleted; duplicates may be rejected by the server depending on phone number.`
+      )
+    ) {
+      event.target.value = '';
+      return;
+    }
 
     setImporting(true);
     try {
@@ -129,32 +152,39 @@ export default function DataManagementPage() {
   return (
     <AppShell title="Data Management">
       <div className="p-4 sm:p-6 lg:p-8 max-w-4xl">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {/* Import */}
-          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm p-5 hover:shadow-md transition-shadow">
             <div className="w-10 h-10 bg-sky-50 border border-sky-100 rounded-xl flex items-center justify-center mb-4">
               <svg className="w-5 h-5 text-sky-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
             </div>
-            <h2 className="text-sm font-bold text-slate-800 mb-1">Import Data</h2>
-            <p className="text-xs text-slate-500 mb-4">Upload CSV or Excel to bulk import leads</p>
-            <label className="block cursor-pointer">
+            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-1">Import Data</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">CSV or Excel — name & phone required</p>
+            <label className="block cursor-pointer mb-2">
               <span className={`inline-flex items-center gap-2 px-4 py-2 bg-sky-500 text-white rounded-xl text-xs font-semibold hover:bg-sky-600 transition-colors ${importing ? 'opacity-50' : ''}`}>
                 {importing ? 'Importing...' : 'Choose File'}
               </span>
               <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileImport} disabled={importing} className="hidden" />
             </label>
+            <button
+              type="button"
+              onClick={downloadCsvTemplate}
+              className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline"
+            >
+              Download CSV template
+            </button>
           </div>
 
           {/* Export */}
-          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm p-5 hover:shadow-md transition-shadow">
             <div className="w-10 h-10 bg-teal-50 border border-teal-100 rounded-xl flex items-center justify-center mb-4">
               <svg className="w-5 h-5 text-teal-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
             </div>
-            <h2 className="text-sm font-bold text-slate-800 mb-1">Export Data</h2>
+            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-1">Export Data</h2>
             <p className="text-xs text-slate-500 mb-2">Download all leads as a CSV file</p>
             {leadCount !== null && (
               <p className="text-[11px] font-medium text-teal-700 bg-teal-50 border border-teal-100 rounded-lg px-2.5 py-1.5 mb-3">
@@ -167,17 +197,27 @@ export default function DataManagementPage() {
           </div>
 
           {/* Manual Entry */}
-          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm p-5 hover:shadow-md transition-shadow">
             <div className="w-10 h-10 bg-violet-50 border border-violet-100 rounded-xl flex items-center justify-center mb-4">
               <svg className="w-5 h-5 text-violet-500" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
               </svg>
             </div>
-            <h2 className="text-sm font-bold text-slate-800 mb-1">Manual Entry</h2>
-            <p className="text-xs text-slate-500 mb-4">Add a single lead manually</p>
+            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-1">Manual Entry</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Add a single lead manually</p>
             <button onClick={() => setShowManualForm(!showManualForm)} className="px-4 py-2 bg-violet-500 text-white rounded-xl text-xs font-semibold hover:bg-violet-600 transition-colors">
               {showManualForm ? 'Cancel' : 'Add Lead'}
             </button>
+          </div>
+
+          {/* Tips */}
+          <div className="bg-gradient-to-br from-slate-50 to-teal-50/50 dark:from-slate-800 dark:to-teal-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-600 p-5">
+            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Data tips</h2>
+            <ul className="text-xs text-slate-600 dark:text-slate-400 space-y-2 list-disc list-inside leading-relaxed">
+              <li>Use E.164 phone numbers (+country) for best deduplication.</li>
+              <li>Export includes current snapshot — refresh the page after imports.</li>
+              <li>Integrations tab can feed leads automatically from ads and forms.</li>
+            </ul>
           </div>
         </div>
 

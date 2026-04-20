@@ -84,6 +84,8 @@ export interface RecentActivity {
   message: string;
   timestamp: string;
   leadName?: string;
+  /** When known, dashboard links this row to the lead detail page */
+  leadId?: string;
 }
 
 export interface Communication {

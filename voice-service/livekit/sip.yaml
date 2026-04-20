@@ -1,0 +1,18 @@
+logging:
+  json: false
+  level: info
+
+api_key: APITwK6ZtZJRjHU
+api_secret: 0TisSwya9bVMbC06Ls52GS2lF08nMvC5MuNN3AcodfO
+ws_url: ws://localhost:7880
+
+redis:
+  address: localhost:6379
+
+sip_port: 5090
+rtp_port: 10100
+rtp_end_port: 20000
+
+# GCP NAT: VM has internal IP 10.160.0.4 but external is 34.14.176.60
+nat_1_to_1_ip: 34.14.176.60
+use_external_ip: false

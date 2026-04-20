@@ -203,12 +203,19 @@ export function DashboardAnalyticsCharts({ analytics }: Props) {
   const k = analytics.analyticsKpis;
 
   return (
-    <div ref={wrapRef} id="dashboard-analytics" className="space-y-5 scroll-mt-24">
+    <div
+      ref={wrapRef}
+      id="dashboard-analytics"
+      className="space-y-5 scroll-mt-24 rounded-3xl border border-slate-200/80 dark:border-slate-600/80 bg-gradient-to-br from-white via-slate-50/80 to-teal-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-teal-950/20 p-5 sm:p-6 shadow-sm"
+    >
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-          <span className="w-1 h-5 bg-violet-500 rounded-full" />
-          Analytics & charts
-        </h2>
+        <div>
+          <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+            <span className="w-1 h-5 bg-gradient-to-b from-violet-500 to-teal-500 rounded-full" />
+            Insights & charts
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Funnels, sources, and trends — export or share as images</p>
+        </div>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"

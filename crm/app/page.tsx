@@ -92,6 +92,16 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('dashboard') === 'insights') {
+      requestAnimationFrame(() => {
+        document.getElementById('dashboard-analytics')?.scrollIntoView({ behavior: 'smooth' });
+      });
+    }
+  }, [stats]);
+
   const actions = (
     <button
       onClick={() => fetchAll(true)}
@@ -155,14 +165,22 @@ export default function DashboardPage() {
 
   return (
     <AppShell title="Dashboard" actions={actions}>
-      <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+      <div className="p-4 sm:p-6 lg:p-8 space-y-8">
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
+        {/* KPI strip — unified with insights below */}
+        <section aria-label="Key metrics">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              <span className="w-1 h-5 bg-gradient-to-b from-teal-500 to-cyan-500 rounded-full" />
+              Overview
+            </h2>
+            <span className="text-[11px] text-slate-400 dark:text-slate-500 hidden sm:inline">Live from your workspace</span>
+          </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
           {STAT_CONFIGS.map((cfg) => (
             <div
               key={cfg.key}
-              className="bg-white rounded-2xl border border-slate-200/70 p-4 shadow-sm hover:shadow-md transition-shadow"
+              className="bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200/80 dark:border-slate-700 p-4 shadow-sm hover:shadow-md hover:border-teal-200/60 dark:hover:border-teal-800/50 transition-all"
             >
               <div className="flex items-center justify-between mb-3">
                 <div className={`w-9 h-9 rounded-xl ${cfg.color} flex items-center justify-center shadow-sm`}>
@@ -179,10 +197,10 @@ export default function DashboardPage() {
                   )}
                 </div>
               </div>
-              <p className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight">
+              <p className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-slate-100 tracking-tight">
                 {getStatValue(stats, cfg.key)}
               </p>
-              <p className="text-xs text-slate-500 font-medium mt-1">{cfg.label}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">{cfg.label}</p>
               {cfg.showNew && stats.newLeads > 0 && (
                 <span className="inline-flex mt-2 px-2 py-0.5 bg-emerald-50 text-emerald-600 text-xs font-semibold rounded-full border border-emerald-100">
                   +{stats.newLeads} new
@@ -191,6 +209,7 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+        </section>
 
         <DashboardAnalyticsCharts analytics={analytics} />
 
@@ -198,9 +217,9 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
 
           {/* Recent Activity */}
-          <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+          <div className="lg:col-span-3 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 <span className="w-1 h-4 bg-teal-500 rounded-full" />
                 Recent Activity
               </h2>
@@ -217,28 +236,47 @@ export default function DashboardPage() {
                 <p className="text-xs text-slate-400 mt-1">Activity will appear as leads come in</p>
               </div>
             ) : (
-              <ul className="divide-y divide-slate-50">
-                {activities.slice(0, 8).map((act, i) => (
-                  <li key={i} className="flex items-start gap-3 px-5 py-3 hover:bg-slate-50/70 transition-colors">
-                    <div className="w-7 h-7 rounded-full bg-teal-50 border border-teal-100 flex items-center justify-center shrink-0 mt-0.5">
-                      <svg className="w-3.5 h-3.5 text-teal-500" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
-                      </svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-slate-700 font-medium leading-snug truncate">{act.message}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{formatTimeAgo(act.timestamp)}</p>
-                    </div>
-                  </li>
-                ))}
+              <ul className="divide-y divide-slate-50 dark:divide-slate-700/80">
+                {activities.slice(0, 8).map((act, i) => {
+                  const row = (
+                    <>
+                      <div className="w-7 h-7 rounded-full bg-teal-50 dark:bg-teal-900/40 border border-teal-100 dark:border-teal-800 flex items-center justify-center shrink-0 mt-0.5">
+                        <svg className="w-3.5 h-3.5 text-teal-500 dark:text-teal-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-700 dark:text-slate-200 font-medium leading-snug">{act.message}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">{formatTimeAgo(act.timestamp)}</p>
+                      </div>
+                    </>
+                  );
+                  return (
+                    <li key={i}>
+                      {act.leadId ? (
+                        <Link
+                          href={`/leads/${act.leadId}`}
+                          className="flex items-start gap-3 px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors group"
+                        >
+                          {row}
+                          <span className="text-[10px] font-semibold text-teal-600 dark:text-teal-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 pt-1">
+                            View →
+                          </span>
+                        </Link>
+                      ) : (
+                        <div className="flex items-start gap-3 px-5 py-3">{row}</div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
 
           {/* Quick Actions */}
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+          <div className="lg:col-span-2 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 <span className="w-1 h-4 bg-teal-500 rounded-full" />
                 Quick Actions
               </h2>

@@ -35,7 +35,7 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
 
   const voiceServiceUrl = config.voiceServiceUrl;
   if (!voiceServiceUrl) {
-    return res.status(503).json({ error: 'Voice service not configured. Set VOICE_SERVICE_URL env var.' });
+    return res.status(503).json({ error: 'Voice service not configured. Set VOICE_SERVICE_URL or LIVEKIT_URL env var.' });
   }
 
   const controller = new AbortController();
@@ -72,7 +72,6 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
 
     const result = await response.json();
 
-    // Mark lead call as initiated
     await db.query(
       `UPDATE leads SET metadata = jsonb_set(
         COALESCE(metadata, '{}'),
