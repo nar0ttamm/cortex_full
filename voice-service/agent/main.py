@@ -126,7 +126,7 @@ Aapka role:
 1. Confirm karein ki prospect available hai baat karne ke liye
 2. Unki inquiry ka reference dein (agar pata ho) ya briefly explain karein ki business kaise help kar sakta hai
 3. 1-2 qualifying questions poochhein unki needs ke baare mein
-4. Agar interested hain, appointment book karein — SPECIFIC din aur TIME poochhein
+4. Agar interested hain, formal meeting/appointment book karein — SPECIFIC din aur TIME poochhein
 5. Har response 1-2 short sentences mein rakhein — phone conversation ki speed mein
 6. Warm aur natural raho — Hindi/Hinglish mein baat karo
 7. Jab woh goodbye bolein, gracefully wrap up karo aur end_call() tool call karo
@@ -135,13 +135,34 @@ Current date and time: {get_ist_datetime()}
 
 LANGUAGE RULE: Default Hindi/Hinglish mein baat karo. Agar caller English mein baat kare, to English mein jawab do. Caller ki language follow karo.
 
-APPOINTMENT BOOKING (CRITICAL):
-- Jab din aur time confirm ho jaye, TURANT book_appointment() tool call karo correct ISO datetime ke saath
-- Pehle confirm karo: "To main aapko [din] ko [time] IST ke liye book kar raha hoon — theek hai?"
-- Confirmation ke baad: "Perfect, CRM calendar mein note ho gaya" — phir end_call() call karo
+━━━ CALLBACK vs APPOINTMENT — BAHUT ZAROORI FARQ ━━━
 
-CALL ENDING (CRITICAL):
-- Jab bhi conversation complete ho (appointment booked ho ya lead ne goodbye kaha), TURANT end_call() tool call karo
+CALLBACK matlab: Lead ne kaha ki "baad mein call karo", "ek ghante mein call karo", "kal call karna",
+"abhi busy hoon", "thodi der baad baat karein" — yani AAPKO UNHE DOBARA CALL KARNA HAI.
+→ Ismein book_appointment() BILKUL MAT KARO.
+→ Sirf end_call(outcome='callback') karo.
+→ Example: "Theek hai, main ek ghante mein dobara call karunga. Aapka din shubh ho!"
+
+APPOINTMENT matlab: Lead ne khud aapke saath ek FORMAL MEETING ya DEMO ke liye SPECIFIC date aur time
+confirm kiya hai — aur dono ne agree kiya hai ek scheduled meeting ke liye.
+→ Tab hi book_appointment() karo.
+→ Example: "Kal subah 10 baje meeting schedule karte hain" — yeh appointment hai.
+
+GALTI MAT KARO:
+✗ "1 ghante mein call karo" → book_appointment() — WRONG, yeh callback hai
+✓ "1 ghante mein call karo" → end_call(outcome='callback') — CORRECT
+✗ "Kal baat karein" → book_appointment() — WRONG, yeh bhi callback hai
+✓ "Kal 11 baje aapki team se meeting fix karein" → book_appointment() — CORRECT
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+APPOINTMENT BOOKING (sirf jab lead formal meeting confirm kare):
+- Pehle confirm karo: "To main aapko [din] ko [time] IST ke liye book kar raha hoon — theek hai?"
+- Lead ke "haan" kehne par: book_appointment() tool call karo correct ISO datetime ke saath
+- Phir: "Perfect, calendar mein note ho gaya" — phir end_call(outcome='appointment_booked') call karo
+
+CALL ENDING:
+- Jab bhi conversation complete ho, TURANT end_call() tool call karo
 - Max 30 words per response. Sirf spoken words — no markdown, no lists."""
 
 
@@ -188,8 +209,13 @@ class CortexFlowAgent(Agent):
         ],
         notes: Annotated[str, "Optional notes about the appointment"] = "",
     ) -> str:
-        """Book an appointment for the lead in CRM. Call this as soon as the customer
-        confirms a SPECIFIC date AND time. This saves it directly to the calendar."""
+        """Book a FORMAL MEETING/APPOINTMENT for the lead in the CRM calendar.
+        ONLY call this when the lead explicitly agrees to a scheduled meeting or demo
+        at a specific date and time — e.g. 'Kal subah 10 baje meeting karte hain'.
+
+        DO NOT call this for callbacks. If the lead says 'call me back in 1 hour',
+        'call me later', 'ek ghante mein call karo', 'kal call karna', 'abhi busy hoon' —
+        these are CALLBACKS, not appointments. Use end_call(outcome='callback') instead."""
         self._appointment = {"iso": appointment_iso, "notes": notes}
         self._outcome     = "appointment_booked"
         logger.info(f"[tool:book_appointment] iso={appointment_iso} notes={notes!r}")
@@ -200,12 +226,21 @@ class CortexFlowAgent(Agent):
         self,
         outcome: Annotated[
             str,
-            "Call outcome. Choose one of: 'interested', 'not_interested', "
-            "'appointment_booked', 'callback', 'unknown'",
+            "Call outcome. Choose one of:\n"
+            "  'appointment_booked' — lead confirmed a formal meeting (use only after book_appointment)\n"
+            "  'callback'           — lead asked to be called back later (e.g. 'call me in 1 hour', 'kal call karo', 'abhi busy hoon')\n"
+            "  'interested'         — lead is interested but no specific next step set\n"
+            "  'not_interested'     — lead is not interested\n"
+            "  'unknown'            — conversation ended without clear outcome\n"
+            "IMPORTANT: Use 'callback' when lead says call back, not appointment_booked.",
         ] = "unknown",
     ) -> str:
-        """End the call. Call this when: appointment is booked and confirmed,
-        or the lead said goodbye, or the lead is not interested.
+        """End the call and signal the outcome. Call this when:
+        - Lead asked for a callback ('call me in 1 hour', 'kal call karo', 'baad mein baat karein') → outcome='callback'
+        - Appointment was formally booked and confirmed → outcome='appointment_booked'
+        - Lead said goodbye or is not interested → outcome='not_interested'
+        - Conversation completed naturally → outcome='interested' or 'unknown'
+
         IMPORTANT: Call this ONLY after you have fully spoken your farewell sentence."""
         if self._outcome == "unknown":
             self._outcome = outcome
@@ -246,10 +281,19 @@ async def summarize_call(transcript: str, call_id: str) -> dict:
 }}
 
 Call time: {now_ist}
+
+CRITICAL — Callback vs Appointment distinction:
+- outcome='callback' → Lead asked to be called back later. Examples: "call me in 1 hour",
+  "call me back", "ek ghante mein call karo", "kal call karna", "abhi busy hoon", "thodi der baad".
+  These mean the AGENT must call the lead again. Do NOT classify these as appointment_booked.
+- outcome='appointment_booked' → Lead explicitly agreed to a formal scheduled meeting/demo
+  at a specific day and time. Both parties agreed to meet.
+
 Rules for proposed_appointment_iso:
-- Only set if customer confirmed SPECIFIC day AND time (calculate ISO 8601 +05:30)
-- "aaj shaam 7 baje" when today is Monday 20 Apr 2026 → "2026-04-20T19:00:00+05:30"
-- Set null if no concrete appointment was confirmed
+- Only set if customer confirmed a FORMAL MEETING at a SPECIFIC day AND time (calculate ISO 8601 +05:30)
+- For callbacks ("call me in 1 hour"), set proposed_appointment_iso to null — it is NOT an appointment
+- "aaj shaam 7 baje" when today is {now_ist} → calculate the correct ISO datetime
+- Set null if no formal appointment was scheduled
 
 Transcript:
 {transcript}"""
