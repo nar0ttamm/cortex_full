@@ -66,7 +66,8 @@ export const speechRecognition = {
     });
 
     live.on(LiveTranscriptionEvents.Error, (err) => {
-      opts.onError(new Error(String(err)));
+      const msg = err instanceof Error ? err.message : JSON.stringify(err);
+      opts.onError(new Error(`Deepgram STT error: ${msg}`));
     });
 
     live.on(LiveTranscriptionEvents.Close, () => {

@@ -40,24 +40,34 @@ function getCurrentIstDateString(): string {
   }
 }
 
-function buildSystemPrompt(): string {
-  return `You are a friendly and professional AI sales assistant for a business using CortexFlow CRM.
-Your role is to:
-1. Warmly greet the prospect and confirm their interest
-2. Briefly explain how the business can help them
-3. Ask qualifying questions about their needs
-4. If interested, offer to schedule an appointment or callback
-5. Keep responses SHORT — 1-2 sentences max per turn, like a real phone conversation
-6. Be natural, empathetic, and never robotic
-7. Detect when the conversation is naturally ending and wrap up politely
+function buildSystemPrompt(opts?: { leadName?: string; leadInquiry?: string }): string {
+  const name = opts?.leadName?.trim();
+  const inquiry = opts?.leadInquiry?.trim();
+
+  let leadCtx = '';
+  if (name) leadCtx += `\nYou are calling ${name}.`;
+  if (inquiry) leadCtx += `\nThey previously enquired about: "${inquiry}". Use this as the conversation starting point.`;
+
+  return `You are a friendly, professional AI sales assistant calling on behalf of a business using CortexFlow CRM.${leadCtx}
+
+Your role:
+1. Confirm the prospect is available to talk (ask if it's a good time)
+2. Reference their inquiry if known, or briefly explain how the business can help
+3. Ask 1-2 qualifying questions about their needs
+4. If interested, offer to book an appointment — get a SPECIFIC day and time from them
+5. Keep each response to 1-2 short sentences maximum — phone conversation pace
+6. Be warm, natural, and never robotic. Mix Hinglish if they do.
+7. Wrap up graciously when they say goodbye or thanks
 
 Current date and time: ${getCurrentIstDateString()}
-When the prospect wants to schedule: confirm the day and clock time (e.g. "tomorrow at noon" or "Friday at 3 PM IST"). Use today's date above to calculate exact future dates. Then say they'll see it on the CRM calendar.
-Default to Indian English / Hinglish if they mix languages.
-When not interested: thank them politely and end the call graciously.
-If they say thanks or goodbye, reply once briefly— the call may hang up automatically after your sign-off.
 
-IMPORTANT: Keep each response under 35 words for low latency voice output. No markdown or bullet lists—spoken words only.`;
+Scheduling rules (CRITICAL):
+- When booking: ask for day AND clock time explicitly. Say it back to confirm ("So I'll book you for tomorrow at 1 PM IST — does that work?")
+- Use today's date above to compute exact future ISO dates
+- Once they confirm a slot, say "Perfect, I've noted it — you'll see it on the calendar" and close the call
+- NEVER ask for more than one thing per turn
+
+IMPORTANT: Max 30 words per response. Spoken words only — no markdown, no bullet points.`;
 }
 
 const END_SIGNALS = [
@@ -98,7 +108,7 @@ export function getLlmRuntimeSummary(): { provider: 'openai'; model: string } {
 }
 
 /** OpenAI chat expects system + alternating user/assistant; fold leading assistant turns into system context. */
-function buildOpenAiMessages(history: Message[]): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+function buildOpenAiMessages(history: Message[], leadCtx?: { leadName?: string; leadInquiry?: string }): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   let i = 0;
   const leadingAssistant: string[] = [];
   while (i < history.length && history[i].role === 'assistant') {
@@ -106,7 +116,7 @@ function buildOpenAiMessages(history: Message[]): OpenAI.Chat.Completions.ChatCo
     i += 1;
   }
   const rest = history.slice(i);
-  let systemContent = buildSystemPrompt();
+  let systemContent = buildSystemPrompt(leadCtx);
   if (leadingAssistant.length > 0) {
     systemContent += `\n\nYou have already said to the caller: ${leadingAssistant.join(' ')}`;
   }
@@ -156,14 +166,15 @@ function isRetryableError(e: unknown): boolean {
 
 async function streamOpenAiAttempt(
   history: Message[],
-  onChunk: (chunk: string) => Promise<void>
+  onChunk: (chunk: string) => Promise<void>,
+  leadCtx?: { leadName?: string; leadInquiry?: string }
 ): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
 
   const model = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
   const client = new OpenAI({ apiKey });
-  const messages = buildOpenAiMessages(history);
+  const messages = buildOpenAiMessages(history, leadCtx);
 
   const stream = await client.chat.completions.create({
     model,
@@ -196,15 +207,16 @@ async function streamOpenAiAttempt(
 
 async function streamOpenAi(
   history: Message[],
-  onChunk: (chunk: string) => Promise<void>
+  onChunk: (chunk: string) => Promise<void>,
+  leadCtx?: { leadName?: string; leadInquiry?: string }
 ): Promise<string> {
   try {
-    return await streamOpenAiAttempt(history, onChunk);
+    return await streamOpenAiAttempt(history, onChunk, leadCtx);
   } catch (e) {
     if (isRetryableError(e)) {
       console.warn('[conversationEngine] LLM transient error, retrying once:', e instanceof Error ? e.message : e);
       await new Promise(r => setTimeout(r, 800));
-      return await streamOpenAiAttempt(history, onChunk);
+      return await streamOpenAiAttempt(history, onChunk, leadCtx);
     }
     throw e;
   }
@@ -220,9 +232,10 @@ const emptySummary = (): CallSummary => ({
 export const conversationEngine = {
   async streamResponse(
     history: Message[],
-    onChunk: (chunk: string) => Promise<void>
+    onChunk: (chunk: string) => Promise<void>,
+    leadCtx?: { leadName?: string; leadInquiry?: string }
   ): Promise<string> {
-    return streamOpenAi(history, onChunk);
+    return streamOpenAi(history, onChunk, leadCtx);
   },
 
   shouldEndCall(responseText: string): boolean {

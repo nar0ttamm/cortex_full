@@ -73,8 +73,8 @@ const WRAP_UP_HANGUP_MS = parseInt(process.env.VOICE_WRAP_UP_DELAY_MS || '700', 
 /** Deepgram sometimes emits duplicate finals; ignore repeats within this window. */
 const USER_UTTERANCE_DEDUPE_MS = parseInt(process.env.VOICE_STT_DEDUPE_MS || '2800', 10);
 /** Short finals without sentence end may be a false end-of-turn; wait for a follow-up final. */
-const STT_MERGE_TAIL_MS = parseInt(process.env.VOICE_STT_MERGE_TAIL_MS || '420', 10);
-const STT_MERGE_MAX_SHORT = parseInt(process.env.VOICE_STT_MERGE_MAX_SHORT || '28', 10);
+const STT_MERGE_TAIL_MS = parseInt(process.env.VOICE_STT_MERGE_TAIL_MS || '700', 10);
+const STT_MERGE_MAX_SHORT = parseInt(process.env.VOICE_STT_MERGE_MAX_SHORT || '45', 10);
 
 function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise(resolve => {
@@ -393,14 +393,37 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
 
       let responseText = '';
       let firstLlmChunkLogged = false;
+      // Minimum chars before we commit a TTS call — avoids paying ~1.3s overhead per tiny chunk.
+      // First chunk is sent immediately for low first-audio latency; subsequent ones are buffered.
+      const MIN_TTS_CHARS = parseInt(process.env.VOICE_TTS_MIN_CHARS || '30', 10);
+      let ttsBuffer = '';
+      let firstChunkSent = false;
+      const flushTtsBuffer = async (): Promise<void> => {
+        const t = ttsBuffer.trim();
+        ttsBuffer = '';
+        if (t) await speakText(callId, rt, t, seqRef);
+      };
+      // Extract inquiry from callScript (backend sets it to: "Hello, I'm calling regarding your inquiry: "...". Is this...")
+      const inquiryMatch = ctx.callScript?.match(/inquiry:\s*"([^"]+)"/i);
+      const leadCtx = {
+        leadName: ctx.name,
+        leadInquiry: inquiryMatch ? inquiryMatch[1] : undefined,
+      };
       await conversationEngine.streamResponse(rt.conversationHistory, async (chunk: string) => {
         if (!firstLlmChunkLogged && chunk.trim()) {
           firstLlmChunkLogged = true;
           metricVoice(callId, 'stt_final_to_first_llm_chunk_ms', Date.now() - turnStart, { turn: turnN });
         }
         responseText += chunk;
-        await speakText(callId, rt, chunk, seqRef);
+        ttsBuffer += (ttsBuffer ? ' ' : '') + chunk;
+        // Send first chunk immediately for fast first-audio; buffer subsequent short pieces.
+        if (!firstChunkSent || ttsBuffer.length >= MIN_TTS_CHARS) {
+          firstChunkSent = true;
+          await flushTtsBuffer();
+        }
       });
+      // Flush any remaining buffered text.
+      await flushTtsBuffer();
 
       const assistantText = responseText.trim();
       if (assistantText) {
@@ -431,6 +454,9 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
     onTranscript: async (text: string, isFinal: boolean) => {
       if (rt.ended) return;
       if (!isFinal) return;
+      // Discard transcripts while AI is speaking (greeting or TTS response).
+      // Audio is still written to Deepgram to keep the WS alive; we just ignore output.
+      if (rt.blockSttAudio) return;
       if (!rt.firstSttFinalLogged) {
         rt.firstSttFinalLogged = true;
         metricVoice(callId, 'answer_to_first_stt_final_ms', Date.now() - rt.answeredAtMs);
@@ -510,7 +536,10 @@ export async function beginEslCallPipeline(callId: string, ctx: PipelineCtx): Pr
         triggerBargeInFromPcm(callId, rt);
       }
     }
-    if (rt.blockSttAudio || Date.now() < rt.sttGateUntil) return;
+    // Always write to Deepgram to keep the WebSocket alive — even during greeting/TTS.
+    // Transcripts emitted while blockSttAudio=true are discarded in onTranscript above.
+    // The post-TTS echo gate (sttGateUntil) still prevents residual echo from being processed.
+    if (Date.now() < rt.sttGateUntil) return;
     stt.write(buf);
   });
 

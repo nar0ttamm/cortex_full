@@ -3,6 +3,9 @@ import http from 'http';
 import { synthesizeElevenLabsToPcm16 } from './elevenLabsTts';
 import { downsamplePcm16Mono16kTo8k } from './wavUtil';
 
+/** Persistent HTTPS agent — reuses TCP connections to api.deepgram.com, saving ~200ms per TTS call. */
+const deepgramHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 6 });
+
 /** Default Aura-2 voice when `DEEPGRAM_TTS_MODEL` is unset (`TTS_PROVIDER=deepgram`). */
 export const DEFAULT_DEEPGRAM_TTS_MODEL = 'aura-2-harmonia-en';
 
@@ -130,10 +133,11 @@ async function synthesizeDeepgram(text: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const model = encodeURIComponent(getDeepgramTtsModel());
     const body = JSON.stringify({ text });
-    const options = {
+    const options: https.RequestOptions = {
       hostname: 'api.deepgram.com',
       path: `/v1/speak?model=${model}&encoding=linear16&sample_rate=8000`,
       method: 'POST',
+      agent: deepgramHttpsAgent,
       headers: {
         'Authorization': `Token ${apiKey}`,
         'Content-Type': 'application/json',
@@ -142,6 +146,12 @@ async function synthesizeDeepgram(text: string): Promise<Buffer> {
     };
 
     const req = https.request(options, (res) => {
+      if (res.statusCode && res.statusCode >= 400) {
+        const err: Buffer[] = [];
+        res.on('data', c => err.push(c));
+        res.on('end', () => reject(new Error(`Deepgram TTS HTTP ${res.statusCode}: ${Buffer.concat(err).toString().slice(0, 200)}`)));
+        return;
+      }
       const chunks: Buffer[] = [];
       res.on('data', chunk => chunks.push(chunk));
       res.on('end', () => resolve(Buffer.concat(chunks)));
