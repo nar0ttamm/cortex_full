@@ -66,3 +66,17 @@ export async function initEslVoiceHooks(): Promise<void> {
   if (started) return;
   await tryInitEslVoiceHooks(1);
 }
+
+/**
+ * Call when the inbound ESL TCP connection drops (e.g. FreeSWITCH Docker restart).
+ * Otherwise `started` stays true and CHANNEL_* handlers are never attached to the new socket — calls stay silent.
+ */
+export function resetEslHooksAfterDisconnect(): void {
+  console.warn('[eslVoiceHooks] ESL disconnected — re-subscribing CHANNEL_ANSWER / CHANNEL_HANGUP_COMPLETE');
+  started = false;
+  if (eslRetryTimer) {
+    clearTimeout(eslRetryTimer);
+    eslRetryTimer = null;
+  }
+  void tryInitEslVoiceHooks(1);
+}

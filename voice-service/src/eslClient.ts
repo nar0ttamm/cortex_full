@@ -92,6 +92,7 @@ export async function getEslConnection(): Promise<EslConnection> {
     conn.on('esl::end', () => {
       connection = null;
       pendingConnect = null;
+      void import('./eslVoiceHooks').then(m => m.resetEslHooksAfterDisconnect());
     });
   });
 
