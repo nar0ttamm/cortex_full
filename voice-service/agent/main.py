@@ -266,7 +266,7 @@ OBJECTION HANDLING FRAMEWORK:
 - "Busy hoon" → "No problem sir. Kab convenient rahega — subah ya shaam?"
 - "Already dekh raha hoon" → "Great sir! Humara project bhi dekh lijiye — comparison mein helpful rahega."
 
-LANGUAGE RULE: Default Hindi/Hinglish. Caller English bolein to English mein jawab do. Caller ki language follow karo.
+LANGUAGE RULE: Always respond in English only. Do NOT switch to Hindi, Urdu, or any other language even if the caller speaks in Hindi or another language. Stay professional and clear in English throughout the entire call.
 
 PACING RULES:
 - Ek sawaal ek baar — ek saath multiple sawaal mat poochho.
@@ -782,10 +782,10 @@ async def _normalize_transcript(transcript: str) -> str:
                 {
                     "role": "system",
                     "content": (
-                        "Convert the following call transcript to English Latin script only. "
-                        "For Hindi/Hinglish speech, write in Roman script (Hinglish). "
-                        "Do NOT translate — just convert script. Keep speaker labels like 'Customer:' and 'AI:'. "
-                        "Output only the converted transcript."
+                        "Translate the following call transcript fully into English. "
+                        "All Hindi, Urdu, Hinglish, or any other language must be translated to natural English. "
+                        "Keep speaker labels like 'Customer:' and 'AI:'. "
+                        "Output only the translated transcript in English."
                     ),
                 },
                 {"role": "user", "content": transcript},
