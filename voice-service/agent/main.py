@@ -266,7 +266,7 @@ OBJECTION HANDLING FRAMEWORK:
 - "Busy hoon" → "No problem sir. Kab convenient rahega — subah ya shaam?"
 - "Already dekh raha hoon" → "Great sir! Humara project bhi dekh lijiye — comparison mein helpful rahega."
 
-LANGUAGE RULE: Always respond in English only. Do NOT switch to Hindi, Urdu, or any other language even if the caller speaks in Hindi or another language. Stay professional and clear in English throughout the entire call.
+LANGUAGE RULE: Default Hindi/Hinglish. Caller English bolein to English mein jawab do. Caller ki language follow karo.
 
 PACING RULES:
 - Ek sawaal ek baar — ek saath multiple sawaal mat poochho.
@@ -768,11 +768,11 @@ def _has_non_latin(text: str) -> bool:
 
 
 async def _normalize_transcript(transcript: str) -> str:
-    """Phase 19: Normalize non-Latin transcript to English Latin script."""
-    if not transcript.strip() or not _has_non_latin(transcript):
+    """Phase 19: Translate full transcript to English for CRM display."""
+    if not transcript.strip():
         return transcript
 
-    logger.info("[transcript] Non-Latin script detected, normalizing...")
+    logger.info("[transcript] Translating transcript to English...")
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
@@ -782,10 +782,10 @@ async def _normalize_transcript(transcript: str) -> str:
                 {
                     "role": "system",
                     "content": (
-                        "Translate the following call transcript fully into English. "
-                        "All Hindi, Urdu, Hinglish, or any other language must be translated to natural English. "
-                        "Keep speaker labels like 'Customer:' and 'AI:'. "
-                        "Output only the translated transcript in English."
+                        "You are a transcript translator. Translate the following sales call transcript entirely into English. "
+                        "Every line — whether spoken in Hindi, Hinglish, Urdu, German, or any other language — must be translated to natural English. "
+                        "Keep speaker labels exactly as they are (e.g. 'AI:', 'Customer:'). "
+                        "Do not add commentary. Output only the translated transcript."
                     ),
                 },
                 {"role": "user", "content": transcript},
@@ -794,10 +794,10 @@ async def _normalize_transcript(transcript: str) -> str:
             temperature=0,
         )
         normalized = resp.choices[0].message.content or transcript
-        logger.info("[transcript] Normalization complete")
+        logger.info("[transcript] Translation to English complete")
         return normalized
     except Exception as exc:
-        logger.warning(f"[transcript] Normalization failed: {exc}. Using raw transcript.")
+        logger.warning(f"[transcript] Translation failed: {exc}. Using raw transcript.")
         return transcript
 
 
