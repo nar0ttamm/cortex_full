@@ -25,7 +25,7 @@ export const callController = {
   async startCall(req: Request, res: Response) {
     if (!requireVoiceSecret(req, res)) return;
 
-    const { tenant_id, lead_id, phone, name, call_script } = req.body;
+    const { tenant_id, lead_id, phone, name, call_script, kb_context } = req.body;
 
     if (!tenant_id || !lead_id || !phone) {
       return res.status(400).json({ error: 'Missing required fields: tenant_id, lead_id, phone' });
@@ -60,6 +60,7 @@ export const callController = {
         leadId: lead_id,
         tenantId: tenant_id,
         tenantName,
+        kbContext: kb_context || null,
       }).catch(async (err: any) => {
         console.error('[callController.startCall:livekit]', err.message);
         try { await callStorage.updateCallStatus(callId, 'failed', err.message); } catch (_) {}

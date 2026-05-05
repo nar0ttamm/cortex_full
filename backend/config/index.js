@@ -40,4 +40,21 @@ module.exports = {
   // OpenAI — post-call transcript analysis (fallback when tenant has no `openai` credentials row)
   openAiApiKey: e(process.env.OPENAI_API_KEY),
   openAiModel: e(process.env.OPENAI_MODEL) || 'gpt-4o-mini',
+
+  // Google OAuth (Phase 6 — Google Calendar)
+  googleClientId: e(process.env.GOOGLE_CLIENT_ID),
+  googleClientSecret: e(process.env.GOOGLE_CLIENT_SECRET),
+  googleRedirectUri: e(process.env.GOOGLE_REDIRECT_URI),
+
+  // Meta OAuth (Phase 8 — Meta Lead Ads)
+  metaAppId: e(process.env.META_APP_ID),
+  metaAppSecret: e(process.env.META_APP_SECRET),
+  metaWebhookVerifyToken: e(process.env.META_WEBHOOK_VERIFY_TOKEN),
+
+  // Supabase admin (Phase 5 — user creation)
+  supabaseUrl: e(process.env.NEXT_PUBLIC_SUPABASE_URL) || e(process.env.SUPABASE_URL),
+  supabaseServiceKey: e(process.env.SUPABASE_SERVICE_ROLE_KEY),
+
+  // CRM URL (for OAuth redirects)
+  crmUrl: e(process.env.CRM_URL) || 'https://crm.cortexflow.in',
 };

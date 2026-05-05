@@ -12,6 +12,8 @@ const PROTECTED_PREFIXES = [
   '/appointments',
   '/tenant',
   '/integrations',
+  '/team',
+  '/projects',
 ];
 const AUTH_PAGES = ['/login', '/signup'];
 

@@ -43,6 +43,20 @@ app.use('/v1', require('./routes/newCalls'));
 app.use('/v1', require('./routes/integrations'));
 // Manual + automatic notification triggers (WhatsApp / email)
 app.use('/v1', require('./routes/notifications'));
+// Demo request flow (landing page)
+app.use('/v1', require('./routes/demo'));
+// V2: Projects, teams, knowledge bases
+app.use('/v1', require('./routes/projects'));
+// V2: User management (admin creates users)
+app.use('/v1', require('./routes/users'));
+// V2: Knowledge base
+app.use('/v1', require('./routes/knowledgeBase'));
+// V2: Activity logs
+app.use('/v1', require('./routes/activityLogs'));
+// V2: Google Calendar OAuth
+app.use('/v1', require('./routes/googleCalendar'));
+// V2: Meta Lead Ads OAuth + webhook
+app.use('/v1', require('./routes/metaIntegration'));
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars

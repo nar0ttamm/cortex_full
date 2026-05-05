@@ -80,8 +80,9 @@ export async function startLivekitCall(params: {
   leadId: string;
   tenantId: string;
   tenantName?: string;
+  kbContext?: Record<string, unknown> | null;
 }): Promise<void> {
-  const { callId, phone, name, inquiry, leadId, tenantId, tenantName } = params;
+  const { callId, phone, name, inquiry, leadId, tenantId, tenantName, kbContext } = params;
   const roomName = `call-${callId}`;
   const metadata = JSON.stringify({
     call_id:     callId,
@@ -90,6 +91,7 @@ export async function startLivekitCall(params: {
     tenant_name: tenantName || '',
     name,
     inquiry,
+    kb_context:  kbContext || null,
   });
 
   // 1. Create the LiveKit room — generic admin token

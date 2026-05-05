@@ -1,16 +1,16 @@
 # CortexFlow — Project Status & Sell-Ready Checklist
 
-> Last updated: April 2026 — reflects current working state.
+> Last updated: 28 April 2026 — Phase 4 CRM UI complete (Kanban view + first-project prompt).
 
 **Legend:** `[x]` done · `[-]` partial / needs improvement · `[ ]` not started
 
 ---
 
-## Honest current state
+# ══════════════════════════════════════════════
+# CORTEXFLOW V1 — PILOT READY (Archived: 27 April 2026)
+# ══════════════════════════════════════════════
 
-The system **works end-to-end in production**: leads are captured, AI calls are made via LiveKit + OpenAI Realtime, appointments are booked and logged in the CRM, WhatsApp and email notifications fire at every key event, and all data lands in Supabase. We are at **pilot-ready** stage — demonstrable and functional — but not yet hardened for at-scale SaaS sales.
-
----
+> **V1 Status: COMPLETE — Pilot Ready.** All features below were working in production as of 27 April 2026. V1 pilot tenant (Acme Real Estate) is live and operational. Do not remove or break any V1 functionality.
 
 ## 1. CRM (`crm/` — Next.js on Vercel)
 
@@ -33,8 +33,7 @@ The system **works end-to-end in production**: leads are captured, AI calls are 
 - [x] Skeleton loading states across pages
 - [x] Dark mode support
 
-### Remaining for sell-ready
-- [ ] Self-serve onboarding flow (current: manual tenant provisioning)
+### V1 Remaining (deprioritised for V2)
 - [ ] Mobile layout QA (currently desktop-first)
 - [ ] Sentry or equivalent client-side error reporting
 - [ ] Billing / plan limits (Stripe integration)
@@ -56,7 +55,7 @@ The system **works end-to-end in production**: leads are captured, AI calls are 
 - [x] Email inbound webhook (Resend → logs lead replies to communications)
 - [x] Health check
 
-### Remaining for sell-ready
+### V1 Remaining (deprioritised for V2)
 - [ ] Rate limiting on public webhook endpoints
 - [ ] Per-tenant admin email/phone in settings (currently falls back to global env)
 - [ ] Structured logging and error alerting (Vercel logs only right now)
@@ -74,13 +73,7 @@ The system **works end-to-end in production**: leads are captured, AI calls are 
 - [x] Telnyx SIP trunk configured in LiveKit SIP
 - [x] GCP firewall: TCP 5000 open
 
-### Quick ops reference (after VM restart)
-1. VM starts → PM2 auto-restarts all 4 services
-2. Run `bash ~/cortexflow-status.sh` to verify + get current IP
-3. Update `VOICE_SERVICE_URL=http://<IP>:5000` in **Vercel backend** env vars and redeploy (or use Vercel CLI)
-4. Calls will work again
-
-### Remaining for sell-ready
+### V1 Remaining (carry to V2 ops)
 - [ ] Static IP in GCP (eliminates manual IP update step, ~₹600/month)
 - [ ] Uptime monitoring on `/health` endpoint (UptimeRobot or similar)
 - [ ] VM disk + memory monitoring
@@ -102,7 +95,7 @@ The system **works end-to-end in production**: leads are captured, AI calls are 
 - [x] Appointment booking → Supabase lead update → CRM calendar reflects it
 - [x] Call transcript saved → chat-bubble display in CRM
 
-### Remaining for sell-ready
+### V1 Remaining (carry to V2)
 - [ ] Voicemail / AMD detection (currently: agent may speak to voicemail)
 - [ ] Max concurrent call capacity documented (current VM: ~3-5 simultaneous)
 - [ ] Conversation quality QA recordings (formal pass/fail criteria)
@@ -110,7 +103,7 @@ The system **works end-to-end in production**: leads are captured, AI calls are 
 
 ---
 
-## 5. Notifications
+## 5. Notifications (V1)
 
 ### Done
 - [x] New lead: 4x (WhatsApp admin, WhatsApp lead, Email admin, Email lead)
@@ -120,43 +113,198 @@ The system **works end-to-end in production**: leads are captured, AI calls are 
 - [x] Manual send from CRM: appointment confirmation + callback reminder buttons in lead detail
 - [x] All notifications logged to `communications_log` in lead metadata
 
-### Remaining for sell-ready
-- [ ] **Move Twilio off sandbox** (see below)
+### V1 Remaining
+- [ ] **Move Twilio off sandbox** (WhatsApp Business API approval needed)
 - [ ] **Resend domain verification** for custom from-address
 - [ ] Per-tenant WhatsApp number support (currently global)
 - [ ] SMS fallback if WhatsApp not delivered
 
 ---
 
-## Moving from Sandbox to Production Messaging
+# ══════════════════════════════════════════════
+# CORTEXFLOW V2 — STARTED 28 APRIL 2026
+# ══════════════════════════════════════════════
 
-### Twilio WhatsApp — what needs to change
-| Step | What to do |
-|---|---|
-| 1. Business verification | Submit business details to Twilio for WhatsApp Business API approval (takes 1-3 days) |
-| 2. Get a real number | Purchase a WhatsApp-enabled Twilio number or bring your own via BYON |
-| 3. Message templates | Pre-approve message templates in Twilio (required for outbound messages to non-opted-in users) |
-| 4. Update credentials | Change `whatsapp_number` in tenant credentials from `+14155238886` (sandbox) to your real number |
-| 5. Lead opt-in | Ensure leads have opted in to receive WhatsApp messages (legally required) |
-| **Cost** | ~$0.005-$0.015 per message depending on country and template type |
-
-### Resend email — what needs to change
-| Step | What to do |
-|---|---|
-| 1. Domain setup | Add DNS records (SPF, DKIM, DMARC) for your sending domain in Resend dashboard |
-| 2. From address | Use `noreply@yourdomain.com` instead of default |
-| 3. Update `from_email` | Set `from_email` in tenant Resend credentials |
-| **Cost** | Free up to 3,000 emails/month; $20/month for 50k |
+> **V2 Goal:** Project-centric AI sales operating system with self-serve onboarding, team hierarchy, project knowledge bases, OAuth integrations, Google Calendar sync, activity logs, and improved calling-agent context injection.
 
 ---
 
-## 6. Cross-Cutting
+## PHASE 1 — LANDING PAGE DEMO FLOW
 
-- [ ] Staging environment mirroring production
-- [ ] Customer documentation / help center
-- [ ] Pilot contract template with SLA disclaimer
-- [ ] GDPR / IT Act data processing agreement template
+- [x] "Book Demo" CTA button added in landing hero section
+- [x] Demo modal/popup: collects name + WhatsApp number
+- [x] Backend: `POST /v1/demo/request` endpoint created
+- [x] `demo_requests` Supabase table with full status tracking fields
+- [x] Demo request triggers AI call immediately (primary action)
+- [x] WhatsApp Business API template message sent as fallback
+- [x] WhatsApp button interaction → retry demo call
+- [x] Status fields: `whatsapp_sent`, `whatsapp_clicked`, `call_triggered`, `call_completed`, `call_completed_at`, `error_log`
 
 ---
 
-*The system is working and demonstrable today. The items above are what separate "pilot-ready" from "sell confidently at scale."*
+## PHASE 2 — CLIENT ONBOARDING + TENANT CREATION
+
+- [x] "Sign Up" / "Get Started" from landing redirects to onboarding flow
+- [x] Step 1: name, company name, phone number, email
+- [x] Step 2: position/role, industry type, address, GSTIN (optional)
+- [x] Step 3: plan selection cards (Starter / Growth / Enterprise) + "3 day trial" note
+- [x] On submit: Supabase Auth user created
+- [x] Tenant created and linked to user
+- [x] User assigned as tenant admin
+- [x] `onboarding_completed` flag set on tenant
+- [x] Auto-login and redirect to CRM dashboard
+- [x] First CRM login: prompt to create first project (optional, not blocking)
+
+---
+
+## PHASE 3 — PROJECT-CENTRIC CRM ARCHITECTURE
+
+- [x] `projects` table created (tenant_id, name, description, team_id, status)
+- [x] `teams` table created (tenant_id, name, manager_id)
+- [x] `team_members` table created (team_id, user_id, role)
+- [x] `leads` table: `project_id` column added
+- [x] `calls` table: `project_id` column added
+- [x] `knowledge_bases` table created (tenant_id, project_id, type, content JSONB)
+- [x] `kb_products` table created (project_id, name, property_type, location, price_range, size, possession_status, amenities)
+- [x] `activity_logs` table created (see Phase 7)
+- [x] `user_profiles` table created (user_id, tenant_id, role, full_name, phone)
+- [x] `appointments` table created (tenant_id, lead_id, project_id, scheduled_at, google_event_id, status)
+- [x] Backend: all queries scoped by tenant_id + project_id where applicable
+- [x] Managers see only their team/project data
+- [x] Executives see only assigned/team leads
+
+---
+
+## PHASE 4 — CRM UI CHANGES
+
+- [x] Sidebar: "Pipeline" item removed
+- [x] Sidebar: "Team" button added below Integrations
+- [x] Leads page: List View / Kanban View toggle
+- [x] Leads page: Kanban/Pipeline component reused inside Leads page
+- [x] Leads page: filter by project, team, assigned user, status
+- [x] Top-right: "Add New Project" button added
+- [x] Project creation wizard — Step 1: name, description
+- [x] Project creation wizard — Step 2: lead source selection OR CSV/Excel import
+- [x] Project creation wizard — Step 3: Knowledge Base / Products (multiple products with all fields)
+- [x] Project creation wizard — Step 4: assign/create team (auto-assign for managers)
+
+---
+
+## PHASE 5 — TEAM + ROLE SYSTEM
+
+- [x] Admin role: full control, create/edit/delete teams, create users, assign roles
+- [x] Manager role: own team access only, own projects only
+- [x] Executive role: assigned/team leads only
+- [x] Admin creates users manually with email + password (no invite links yet)
+- [x] Permission guards implemented in backend (not just frontend)
+- [x] Role middleware on all sensitive routes
+- [x] "Team" page in CRM: list team members, add/remove, change roles
+- [x] User creation UI for admin
+
+---
+
+## PHASE 6 — GOOGLE CALENDAR SYNC
+
+- [x] Google Calendar OAuth flow (admin-only)
+- [x] `google_calendar_tokens` table: tenant_id, access_token, refresh_token, calendar_id, expiry
+- [x] Appointments saved internally first (DB is source of truth)
+- [x] If Google sync enabled: create Google Calendar event on appointment
+- [x] `google_event_id` stored on appointment record
+- [x] Meeting/invite link sent to lead if available
+- [x] Token refresh handled automatically
+
+---
+
+## PHASE 7 — ACTIVITY LOGGING
+
+- [x] `activity_logs` table: tenant_id, project_id, user_id, action_type, entity_type, entity_id, metadata JSONB, created_at
+- [x] Log: lead import, lead export, manual lead creation, integration lead received
+- [x] Log: demo request, WhatsApp template sent, WhatsApp button interaction
+- [x] Log: call triggered, call completed
+- [x] Log: appointment booked, project created, team created, user created
+- [x] Log: integration connected/disconnected
+- [x] Activity history shown in Data panel or dedicated logs section in CRM
+
+---
+
+## PHASE 8 — META + GOOGLE ADS OAUTH INTEGRATIONS
+
+- [x] Meta OAuth flow: authorize → exchange token → long-lived token
+- [x] Fetch + select Meta pages, store page_id + page_access_token
+- [x] Subscribe page(s) to leadgen webhook via Meta Graph API
+- [x] Store page_id → tenant_id/project_id mapping
+- [x] Meta webhook: verify challenge, receive leadgen, deduplicate, fetch lead details, normalize, store, trigger workflow
+- [x] Google Ads OAuth flow: authorize → store tokens securely
+- [x] Google Ads: map connected account to tenant/project
+- [x] Google Ads: incoming leads normalized into existing lead ingestion flow
+- [x] All integration actions logged in activity_logs
+- [x] Required env vars documented in DOCS
+
+---
+
+## PHASE 9 — KNOWLEDGE BASE SYSTEM
+
+- [x] Tenant-level KB: company tone, brand voice, calling rules, company instructions
+- [x] Project-level KB: structured product/property entries
+- [x] KB stored in Supabase (tenant_id + project_id scoped)
+- [x] Multiple products/properties per project
+- [x] KB editable from CRM project detail page
+- [x] Structured JSON storage (not just free-text)
+
+---
+
+## PHASE 10 — CALLING STACK KB INJECTION
+
+- [x] `/v1/calls/start` fetches: lead, tenant KB, project KB, project products
+- [x] Context payload sent to voice-service
+- [x] voice-service passes context to Python agent
+- [x] Agent builds dynamic instructions: system rules + tenant KB + project KB + lead context
+- [x] Agent uses Hindi/Hinglish naturally
+- [x] Agent suggests only products from project KB (no hallucination)
+- [x] Agent respects tenant tone and project-specific details
+- [x] `book_appointment` and `end_call` tools continue working
+- [x] KB summarized/structured to avoid huge prompts
+
+---
+
+## PHASE 11 — TRANSCRIPT FIX
+
+- [x] Agent/STT layer instructed to produce transcripts in English Latin script
+- [x] Backend detects non-Latin scripts in transcript
+- [x] Fallback: OpenAI converts non-Latin transcript to English Latin script
+- [x] Normalized transcript stored and displayed in CRM
+- [x] Raw transcript preserved optionally for debugging
+
+---
+
+## PHASE 12 — SAFETY, TESTING, DEPLOYMENT
+
+- [-] Build verified: landing (npm run build)
+- [x] Build verified: CRM TypeScript (npx tsc --noEmit — 0 errors)
+- [x] Build verified: CRM full next build (npx next build — 0 errors, all routes compiled)
+- [ ] Build verified: backend (no TypeScript errors)
+- [x] Supabase migrations applied and verified
+- [ ] Auth/session flows tested end-to-end
+- [ ] Vercel env requirements documented and added to Vercel project settings
+- [x] DOCS updated with new env vars and setup steps
+- [ ] Deployed to Vercel (landing + CRM + backend)
+- [ ] V1 pilot tenant verified still working after V2 deploy
+
+---
+
+## New Environment Variables Required (V2)
+
+| Variable | Service | Purpose |
+|---|---|---|
+| `META_APP_ID` | backend | Meta OAuth app ID |
+| `META_APP_SECRET` | backend | Meta OAuth app secret |
+| `META_WEBHOOK_VERIFY_TOKEN` | backend | Meta webhook challenge token |
+| `GOOGLE_CLIENT_ID` | backend | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | backend | Google OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | backend | Google OAuth redirect URI |
+| `NEXT_PUBLIC_BACKEND_URL` | CRM | Public backend URL for onboarding flow |
+| `ONBOARDING_SECRET` | backend | Secret for self-serve tenant creation |
+
+---
+
+*V1 is archived above and remains in production. V2 is being built on top of V1 without breaking existing functionality.*

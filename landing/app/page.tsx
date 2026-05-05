@@ -4,6 +4,7 @@ import { HeroBackground } from "./components/HeroBackground";
 import { PricingCarousel } from "./components/PricingCarousel";
 import { ScrollReveal } from "./components/ScrollReveal";
 import { SectionReveal } from "./components/SectionReveal";
+import { BookDemoButton } from "./components/BookDemoButton";
 
 const CRM_URL = "https://crm.cortexflow.in";
 
@@ -116,7 +117,7 @@ export default function Home() {
           <div className="flex items-center gap-2 md:gap-3">
             <a
               href="#contact"
-              className="rounded-none border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--fg)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] md:px-5 md:py-3 md:text-sm"
+              className="hidden md:block rounded-none border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--fg)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] md:px-5 md:py-3 md:text-sm"
             >
               Talk to Sales
             </a>
@@ -124,9 +125,15 @@ export default function Home() {
               href={CRM_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-none bg-[var(--accent)] px-3 py-2 text-xs font-medium text-[var(--bg)] transition hover:bg-[var(--accent-dim)] hover:shadow-[0_0_20px_var(--glow)] md:px-6 md:py-3.5 md:text-base"
+              className="rounded-none border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--fg)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] md:px-5 md:py-3 md:text-sm"
             >
               Sign in
+            </a>
+            <a
+              href={`${CRM_URL}/signup`}
+              className="rounded-none bg-[var(--accent)] px-3 py-2 text-xs font-medium text-[var(--bg)] transition hover:bg-[var(--accent-dim)] hover:shadow-[0_0_20px_var(--glow)] md:px-6 md:py-3.5 md:text-base"
+            >
+              Get Started
             </a>
           </div>
         </nav>
@@ -160,6 +167,7 @@ export default function Home() {
               </ScrollReveal>
               <ScrollReveal delay={250}>
                 <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 md:mt-12">
+                  <BookDemoButton />
                   <a
                     href={CRM_URL}
                     target="_blank"

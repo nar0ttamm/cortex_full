@@ -29,7 +29,7 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
   }
 
   const leadResult = await db.query(
-    'SELECT id, name, phone, inquiry FROM leads WHERE id = $1 AND tenant_id = $2',
+    'SELECT id, name, phone, inquiry, project_id FROM leads WHERE id = $1 AND tenant_id = $2',
     [lead_id, tenant_id]
   );
   if (leadResult.rows.length === 0) {
@@ -41,6 +41,66 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
   if (!voiceServiceUrl) {
     return res.status(503).json({ error: 'Voice service not configured. Set VOICE_SERVICE_URL or LIVEKIT_URL env var.' });
   }
+
+  // ── Phase 10: Fetch KB context ─────────────────────────────────────────────
+  let kb_context = null;
+  try {
+    // Tenant-level KB
+    const tenantKbResult = await db.query(
+      `SELECT brand_voice, calling_rules, company_instructions FROM knowledge_bases
+       WHERE tenant_id = $1 AND type = 'tenant' ORDER BY updated_at DESC LIMIT 1`,
+      [tenant_id]
+    );
+
+    // Project-level KB + products (if lead has a project)
+    let projectKb = null;
+    let products = [];
+    let projectName = null;
+
+    if (lead.project_id) {
+      const projectResult = await db.query(
+        `SELECT name FROM projects WHERE id = $1 AND tenant_id = $2`,
+        [lead.project_id, tenant_id]
+      );
+      projectName = projectResult.rows[0]?.name || null;
+
+      const projectKbResult = await db.query(
+        `SELECT brand_voice, calling_rules, company_instructions FROM knowledge_bases
+         WHERE tenant_id = $1 AND project_id = $2 AND type = 'project' ORDER BY updated_at DESC LIMIT 1`,
+        [tenant_id, lead.project_id]
+      );
+      projectKb = projectKbResult.rows[0] || null;
+
+      const productsResult = await db.query(
+        `SELECT name, property_type, location, price_range, size, possession_status, amenities
+         FROM kb_products WHERE project_id = $1 AND is_active = true LIMIT 10`,
+        [lead.project_id]
+      );
+      products = productsResult.rows;
+    }
+
+    const tenantKb = tenantKbResult.rows[0] || null;
+
+    if (tenantKb || projectKb || products.length > 0 || projectName) {
+      kb_context = {
+        tenant: tenantKb ? {
+          brand_voice: tenantKb.brand_voice,
+          calling_rules: tenantKb.calling_rules,
+          company_instructions: tenantKb.company_instructions,
+        } : null,
+        project: projectKb ? {
+          brand_voice: projectKb.brand_voice,
+          calling_rules: projectKb.calling_rules,
+          company_instructions: projectKb.company_instructions,
+          name: projectName,
+        } : (projectName ? { name: projectName } : null),
+        products: products.slice(0, 5), // Limit to 5 products to keep prompt manageable
+      };
+    }
+  } catch (kbErr) {
+    console.warn('[calls/start] KB fetch failed (non-critical):', kbErr.message);
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25000);
@@ -58,6 +118,7 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
         phone: lead.phone,
         name: lead.name,
         call_script: lead.inquiry ? `Hello, I'm calling regarding your inquiry: "${lead.inquiry}". Is this a good time to talk?` : undefined,
+        kb_context,
       }),
       signal: controller.signal,
     });

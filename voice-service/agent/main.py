@@ -98,11 +98,56 @@ def get_ist_datetime() -> str:
     return now.strftime("%A, %d %B %Y — %H:%M IST")
 
 
+def build_kb_section(kb_context: dict | None) -> str:
+    """Build a compact KB instructions section from the KB context payload."""
+    if not kb_context:
+        return ""
+
+    lines = []
+
+    # Tenant-level KB
+    tenant = kb_context.get("tenant") or {}
+    if tenant.get("calling_rules"):
+        lines.append(f"\nCALLING RULES (follow strictly):\n{tenant['calling_rules']}")
+    if tenant.get("brand_voice"):
+        lines.append(f"\nBRAND VOICE / TONE:\n{tenant['brand_voice']}")
+    if tenant.get("company_instructions"):
+        lines.append(f"\nCOMPANY INSTRUCTIONS:\n{tenant['company_instructions']}")
+
+    # Project-level KB
+    project = kb_context.get("project") or {}
+    if project.get("name"):
+        lines.append(f"\nPROJECT: {project['name']}")
+    if project.get("calling_rules"):
+        lines.append(f"Project-specific rules: {project['calling_rules']}")
+    if project.get("company_instructions"):
+        lines.append(f"Project instructions: {project['company_instructions']}")
+
+    # Products
+    products = kb_context.get("products") or []
+    if products:
+        lines.append("\n━━ PRODUCTS / PROPERTIES TO SELL ━━")
+        lines.append("Sirf niche diye gaye products pitch karo. Koi aur product invent mat karo.\n")
+        for i, p in enumerate(products, 1):
+            parts = [f"{i}. {p.get('name', 'Product')}"]
+            if p.get("property_type"):   parts.append(f"   Type: {p['property_type']}")
+            if p.get("location"):        parts.append(f"   Location: {p['location']}")
+            if p.get("price_range"):     parts.append(f"   Price: {p['price_range']}")
+            if p.get("size"):            parts.append(f"   Size: {p['size']}")
+            if p.get("possession_status"): parts.append(f"   Possession: {p['possession_status']}")
+            if p.get("amenities"):       parts.append(f"   Amenities: {p['amenities']}")
+            lines.append("\n".join(parts))
+        lines.append("\nIMPORTANT: Do NOT mention any product not listed above.")
+
+    return "\n".join(lines) if lines else ""
+
+
 def build_instructions(
     lead_name: str = "",
     lead_inquiry: str = "",
     mode: str = "groq",
     tenant_name: str = "",
+    kb_context: dict | None = None,
 ) -> str:
     name_ctx    = f"\nAap {lead_name} ko call kar rahe hain." if lead_name else ""
     inquiry_ctx = (
@@ -119,6 +164,9 @@ def build_instructions(
         if mode == "realtime"
         else ""
     )
+
+    kb_section = build_kb_section(kb_context)
+
     return f"""\
 Aap {biz} ke liye ek friendly aur professional AI sales assistant hain.{name_ctx}{inquiry_ctx}{opening}
 
@@ -134,7 +182,7 @@ Aapka role:
 Current date and time: {get_ist_datetime()}
 
 LANGUAGE RULE: Default Hindi/Hinglish mein baat karo. Agar caller English mein baat kare, to English mein jawab do. Caller ki language follow karo.
-
+{kb_section}
 ━━━ CALLBACK vs APPOINTMENT — BAHUT ZAROORI FARQ ━━━
 
 CALLBACK matlab: Lead ne kaha ki "baad mein call karo", "ek ghante mein call karo", "kal call karna",
@@ -175,6 +223,7 @@ class CortexFlowAgent(Agent):
         instructions: str,
         mode: str = "groq",
         tenant_name: str = "",
+        kb_context: dict | None = None,
     ):
         super().__init__(instructions=instructions)
         self._lead_name   = lead_name
@@ -345,6 +394,60 @@ async def notify_backend(
         logger.error(f"[notify:{call_id}] {exc}")
 
 
+def _has_non_latin(text: str) -> bool:
+    """Return True if text contains non-Latin script characters (Urdu, Devanagari, Arabic, etc.)."""
+    import unicodedata
+    for ch in text:
+        cat = unicodedata.category(ch)
+        name = unicodedata.name(ch, "")
+        # Check for common non-Latin scripts: Devanagari, Arabic, Urdu, etc.
+        if any(script in name for script in ("DEVANAGARI", "ARABIC", "URDU", "BENGALI", "GUJARATI", "GURMUKHI", "TAMIL", "TELUGU", "KANNADA", "MALAYALAM")):
+            return True
+    return False
+
+
+async def _normalize_transcript(transcript: str) -> str:
+    """
+    Phase 11: Normalize transcript to English Latin script.
+    If non-Latin characters are detected, use OpenAI to transliterate/translate.
+    """
+    if not transcript.strip():
+        return transcript
+
+    if not _has_non_latin(transcript):
+        return transcript  # Already Latin script — no action needed
+
+    logger.info("[transcript] Non-Latin script detected, normalizing to English Latin script...")
+
+    try:
+        from openai import AsyncOpenAI  # noqa: PLC0415
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+        resp = await client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a transliteration assistant. Convert the following call transcript "
+                        "to English Latin script only. For Hindi/Hinglish speech, write it in Roman/Latin "
+                        "script (Hinglish). For English speech, keep it as-is. "
+                        "Do NOT translate — just convert script. Keep speaker labels like 'Customer:' and 'AI:'. "
+                        "Output only the converted transcript, nothing else."
+                    ),
+                },
+                {"role": "user", "content": transcript},
+            ],
+            max_tokens=2000,
+            temperature=0,
+        )
+        normalized = resp.choices[0].message.content or transcript
+        logger.info("[transcript] Normalization complete")
+        return normalized
+    except Exception as exc:
+        logger.warning(f"[transcript] Normalization failed: {exc}. Using raw transcript.")
+        return transcript
+
+
 def _build_transcript(session: AgentSession, extra_lines: list[str] | None = None) -> str:
     lines: list[str] = []
     for msg in session.history.messages():
@@ -432,6 +535,7 @@ async def entrypoint(ctx: JobContext) -> None:
     tenant_id: str    = metadata.get("tenant_id", "")
     tenant_name: str  = metadata.get("tenant_name", "")
     lead_inquiry: str = metadata.get("inquiry", "")
+    kb_context: dict | None = metadata.get("kb_context") or None
     raw_room          = ctx.room.name
     call_id: str      = metadata.get(
         "call_id",
@@ -439,14 +543,20 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     sip_identity      = f"sip-{call_id}"   # matches livekitBridge.ts participant_identity
 
-    logger.info(f"[agent:{call_id}] lead_id={lead_id} name={lead_name!r} tenant={tenant_name!r}")
+    logger.info(f"[agent:{call_id}] lead_id={lead_id} name={lead_name!r} tenant={tenant_name!r} has_kb={kb_context is not None}")
 
     session = _make_session(call_id)
     agent   = CortexFlowAgent(
         lead_name=lead_name,
-        instructions=build_instructions(lead_name, lead_inquiry, mode=AGENT_MODE, tenant_name=tenant_name),
+        instructions=build_instructions(
+            lead_name, lead_inquiry,
+            mode=AGENT_MODE,
+            tenant_name=tenant_name,
+            kb_context=kb_context,
+        ),
         mode=AGENT_MODE,
         tenant_name=tenant_name,
+        kb_context=kb_context,
     )
 
     started_at = time.monotonic()
@@ -508,7 +618,9 @@ async def entrypoint(ctx: JobContext) -> None:
         if agent._outcome != "unknown":
             summary_data["outcome"] = agent._outcome
 
-    transcript = _build_transcript(session)
+    raw_transcript = _build_transcript(session)
+    # Phase 11: Normalize non-Latin script to English Latin
+    transcript = await _normalize_transcript(raw_transcript)
     await notify_backend(call_id, lead_id, tenant_id, transcript, duration_s, summary_data)
 
 

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Sidebar } from './Sidebar';
 import { NotificationToast } from './NotificationToast';
+import { ProjectWizard } from './ProjectWizard';
 
 type Props = {
   children: React.ReactNode;
@@ -14,6 +15,7 @@ export function AppShell({ children, title, actions }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [dark, setDark] = useState(false);
+  const [projectWizardOpen, setProjectWizardOpen] = useState(false);
 
   useEffect(() => {
     const savedCollapsed = localStorage.getItem('sidebar-collapsed');
@@ -90,6 +92,18 @@ export function AppShell({ children, title, actions }: Props) {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Add New Project button */}
+            <button
+              onClick={() => setProjectWizardOpen(true)}
+              data-action="new-project"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 rounded-lg text-xs font-semibold transition-colors border border-teal-500/20"
+              title="Create new project"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              New Project
+            </button>
             {/* Dark mode toggle */}
             <button
               onClick={toggleDark}
@@ -116,6 +130,11 @@ export function AppShell({ children, title, actions }: Props) {
       </div>
 
       <NotificationToast />
+      <ProjectWizard
+        open={projectWizardOpen}
+        onClose={() => setProjectWizardOpen(false)}
+        onCreated={() => { setProjectWizardOpen(false); }}
+      />
     </div>
   );
 }

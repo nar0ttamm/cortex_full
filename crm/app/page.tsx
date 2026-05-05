@@ -44,6 +44,7 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAuthError, setIsAuthError] = useState(false);
+  const [showProjectPrompt, setShowProjectPrompt] = useState(false);
 
   const fetchAll = useCallback(async (isRefresh = false, attempt = 1) => {
     try {
@@ -99,6 +100,10 @@ export default function DashboardPage() {
       requestAnimationFrame(() => {
         document.getElementById('dashboard-analytics')?.scrollIntoView({ behavior: 'smooth' });
       });
+    }
+    // Show first-project prompt after fresh onboarding
+    if (url.searchParams.get('onboarding') === 'complete') {
+      setShowProjectPrompt(true);
     }
   }, [stats]);
 
@@ -166,6 +171,32 @@ export default function DashboardPage() {
   return (
     <AppShell title="Dashboard" actions={actions}>
       <div className="p-4 sm:p-6 lg:p-8 space-y-8">
+
+        {/* First-project onboarding prompt */}
+        {showProjectPrompt && (
+          <div className="relative overflow-hidden rounded-2xl border border-teal-200/60 dark:border-teal-800/40 bg-gradient-to-r from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 p-5 flex items-center gap-5">
+            <div className="w-12 h-12 rounded-xl bg-teal-500 flex items-center justify-center shrink-0 shadow-md">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-teal-900 dark:text-teal-100">Welcome to CortexFlow! Create your first project to get started.</p>
+              <p className="text-xs text-teal-700/80 dark:text-teal-300/70 mt-0.5">Organise leads, assign teams, and set up your AI calling knowledge base — all in one project.</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => { setShowProjectPrompt(false); (document.querySelector('[data-action="new-project"]') as HTMLButtonElement)?.click(); }}
+                className="px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white rounded-xl text-xs font-semibold shadow-sm transition-colors"
+              >
+                Create Project
+              </button>
+              <button onClick={() => setShowProjectPrompt(false)} className="p-1.5 text-teal-600/50 hover:text-teal-700 dark:text-teal-400 rounded-lg transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* KPI strip — unified with insights below */}
         <section aria-label="Key metrics">
