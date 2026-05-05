@@ -560,11 +560,34 @@
 
 ## PHASE 21 — DEPLOYMENT
 
-- [ ] Backend deployed to Vercel (after manual testing)
-- [ ] CRM deployed (no CRM changes in V3)
-- [ ] Voice-service updated on GCP (PM2 restart: `pm2 restart cortex-agent`)
-- [ ] `/health` endpoints verified
-- [ ] Real test call made post-deployment
+- [x] Backend deployed to Vercel production — `https://cortex-backend-api.vercel.app` ✓
+- [x] Deployment URL: `https://cortex-backend-41x8z23sr-narottam-sharmas-projects.vercel.app`
+- [x] `/health` endpoint verified — `{"status":"healthy","database":"connected"}`
+- [x] New `/v1/calls/tools/*` routes live — 401 Unauthorized on missing secret (correct)
+- [x] CRM not deployed (no CRM changes in V3)
+- [x] Landing not deployed (no landing changes in V3)
+- [ ] Voice-service updated on GCP VM — PENDING manual steps below
+- [ ] Real test call made post-deployment — PENDING
+
+### GCP VM Deployment Steps (Manual)
+```bash
+# SSH into GCP VM, then:
+cd ~/voice-service
+git pull origin main
+
+# Set new env var if not already present
+echo "BACKEND_URL=https://cortex-backend-api.vercel.app" >> .env
+
+# Rebuild TypeScript
+npm run build
+
+# Restart agent
+pm2 restart cortex-agent
+pm2 status
+
+# Verify health
+curl http://localhost:5000/health
+```
 
 ---
 
