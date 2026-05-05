@@ -1,6 +1,6 @@
 # CortexFlow — Project Status & Sell-Ready Checklist
 
-> Last updated: 28 April 2026 — Phase 4 CRM UI complete (Kanban view + first-project prompt).
+> Last updated: 5 May 2026 — V2 Phases 1–11 complete, code committed and deployed to Vercel.
 
 **Legend:** `[x]` done · `[-]` partial / needs improvement · `[ ]` not started
 
@@ -279,16 +279,16 @@
 
 ## PHASE 12 — SAFETY, TESTING, DEPLOYMENT
 
-- [-] Build verified: landing (npm run build)
+- [x] Build verified: landing (npm run build — 0 errors, all static pages generated)
 - [x] Build verified: CRM TypeScript (npx tsc --noEmit — 0 errors)
 - [x] Build verified: CRM full next build (npx next build — 0 errors, all routes compiled)
-- [ ] Build verified: backend (no TypeScript errors)
-- [x] Supabase migrations applied and verified
-- [ ] Auth/session flows tested end-to-end
-- [ ] Vercel env requirements documented and added to Vercel project settings
+- [x] Build verified: backend (all 7 new V2 JS routes load cleanly via node require)
+- [x] Supabase migrations applied and verified (all 19 V2 tables confirmed live)
+- [ ] Auth/session flows tested end-to-end (manual — requires live env)
+- [ ] V2 env vars added to Vercel project settings (manual — requires 3rd party credentials)
 - [x] DOCS updated with new env vars and setup steps
-- [ ] Deployed to Vercel (landing + CRM + backend)
-- [ ] V1 pilot tenant verified still working after V2 deploy
+- [x] Deployed to Vercel: landing (www.cortexflow.in), CRM (crm.cortexflow.in), backend (cortex-backend-api.vercel.app)
+- [ ] V1 pilot tenant verified still working after V2 deploy (manual — test on live URL)
 
 ---
 
