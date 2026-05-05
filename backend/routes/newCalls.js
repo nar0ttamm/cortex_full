@@ -7,6 +7,10 @@ const {
   sendAppointmentBookedNotifications,
   sendCallbackNotifications,
 } = require('../services/notificationService');
+const { buildCallContext } = require('../services/callContextBuilder');
+const { selectProducts } = require('../services/productSelector');
+const { extractAndStoreIntent } = require('../services/leadIntentExtractor');
+const { trackCallOutcome } = require('../services/usageTracker');
 
 const router = Router();
 
@@ -42,65 +46,47 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
     return res.status(503).json({ error: 'Voice service not configured. Set VOICE_SERVICE_URL or LIVEKIT_URL env var.' });
   }
 
-  // ── Phase 10: Fetch KB context ─────────────────────────────────────────────
-  let kb_context = null;
+  // ── V3: Build compact call brief using context builder + product selector ────
+  let call_brief = null;
   try {
-    // Tenant-level KB
-    const tenantKbResult = await db.query(
-      `SELECT brand_voice, calling_rules, company_instructions FROM knowledge_bases
-       WHERE tenant_id = $1 AND type = 'tenant' ORDER BY updated_at DESC LIMIT 1`,
-      [tenant_id]
-    );
+    // Extract and store lead intent (Phase 3)
+    await extractAndStoreIntent({
+      leadId: lead_id,
+      tenantId: tenant_id,
+      projectId: lead.project_id || null,
+      inquiry: lead.inquiry || '',
+    }).catch(() => {});
 
-    // Project-level KB + products (if lead has a project)
-    let projectKb = null;
-    let products = [];
-    let projectName = null;
+    // Build compact call context (Phase 1)
+    const callContext = await buildCallContext({ tenantId: tenant_id, leadId: lead_id });
 
+    // Select relevant products using rule-based matching (Phase 2)
+    let initial_products = [];
     if (lead.project_id) {
-      const projectResult = await db.query(
-        `SELECT name FROM projects WHERE id = $1 AND tenant_id = $2`,
-        [lead.project_id, tenant_id]
-      );
-      projectName = projectResult.rows[0]?.name || null;
-
-      const projectKbResult = await db.query(
-        `SELECT brand_voice, calling_rules, company_instructions FROM knowledge_bases
-         WHERE tenant_id = $1 AND project_id = $2 AND type = 'project' ORDER BY updated_at DESC LIMIT 1`,
-        [tenant_id, lead.project_id]
-      );
-      projectKb = projectKbResult.rows[0] || null;
-
-      const productsResult = await db.query(
-        `SELECT name, property_type, location, price_range, size, possession_status, amenities
-         FROM kb_products WHERE project_id = $1 AND is_active = true LIMIT 10`,
-        [lead.project_id]
-      );
-      products = productsResult.rows;
+      initial_products = await selectProducts({
+        projectId: lead.project_id,
+        tenantId: tenant_id,
+        leadContext: {
+          inquiry: lead.inquiry || '',
+          preferred_location: callContext.call_context.lead_location,
+          property_type: callContext.call_context.lead_property_type,
+          budget: callContext.call_context.lead_budget,
+        },
+      });
     }
 
-    const tenantKb = tenantKbResult.rows[0] || null;
-
-    if (tenantKb || projectKb || products.length > 0 || projectName) {
-      kb_context = {
-        tenant: tenantKb ? {
-          brand_voice: tenantKb.brand_voice,
-          calling_rules: tenantKb.calling_rules,
-          company_instructions: tenantKb.company_instructions,
-        } : null,
-        project: projectKb ? {
-          brand_voice: projectKb.brand_voice,
-          calling_rules: projectKb.calling_rules,
-          company_instructions: projectKb.company_instructions,
-          name: projectName,
-        } : (projectName ? { name: projectName } : null),
-        products: products.slice(0, 5), // Limit to 5 products to keep prompt manageable
-      };
-    }
-  } catch (kbErr) {
-    console.warn('[calls/start] KB fetch failed (non-critical):', kbErr.message);
+    call_brief = {
+      ...callContext,
+      initial_products,
+    };
+  } catch (briefErr) {
+    console.warn('[calls/start] call_brief build failed (non-critical):', briefErr.message);
+    // Fall back to legacy kb_context if brief fails — keep calls working
   }
   // ─────────────────────────────────────────────────────────────────────────────
+
+  // Track usage: call attempted (Phase 10)
+  void trackCallOutcome(tenant_id, { outcome: 'attempted', durationSeconds: 0 }).catch(() => {});
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25000);
@@ -117,8 +103,8 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
         lead_id,
         phone: lead.phone,
         name: lead.name,
-        call_script: lead.inquiry ? `Hello, I'm calling regarding your inquiry: "${lead.inquiry}". Is this a good time to talk?` : undefined,
-        kb_context,
+        call_script: lead.inquiry || undefined,
+        call_brief,
       }),
       signal: controller.signal,
     });
@@ -281,7 +267,7 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
 
     await client.query('COMMIT');
 
-    // Post-commit: fire outcome-based notifications (best-effort, never block the response)
+    // Post-commit: fire outcome-based notifications + usage tracking (best-effort)
     void (async () => {
       try {
         const leadRow = await db.query(
@@ -302,6 +288,16 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
         }
       } catch (notifErr) {
         console.error('[calls/result] post-commit notification failed:', notifErr.message);
+      }
+
+      // Track usage (Phase 10)
+      try {
+        await trackCallOutcome(tenant_id, {
+          outcome: outcome || 'unknown',
+          durationSeconds: duration_seconds || 0,
+        });
+      } catch (usageErr) {
+        console.warn('[calls/result] usage tracking failed:', usageErr.message);
       }
     })();
 

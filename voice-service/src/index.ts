@@ -17,6 +17,12 @@ app.post('/voice/start-call', callController.startCall);
 app.post('/voice/end-call', callController.endCall);
 app.post('/voice/call-result', callController.callResult);
 
+// V3: Agent runtime tool proxy endpoints — agent calls these; they proxy to backend
+import { agentToolProxy } from './agentToolProxy';
+app.post('/voice/tools/search-products', agentToolProxy.searchProducts);
+app.post('/voice/tools/update-lead-memory', agentToolProxy.updateLeadMemory);
+app.post('/voice/tools/log-analytics', agentToolProxy.logAnalytics);
+
 app.get('/health', (_req, res) => {
   const llm = getLlmRuntimeSummary();
   const tts = getTtsRuntimeSummary();

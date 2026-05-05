@@ -57,6 +57,8 @@ app.use('/v1', require('./routes/activityLogs'));
 app.use('/v1', require('./routes/googleCalendar'));
 // V2: Meta Lead Ads OAuth + webhook
 app.use('/v1', require('./routes/metaIntegration'));
+// V3: Agent runtime tools (product search, lead memory, analytics)
+app.use('/v1', require('./routes/callTools'));
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars
