@@ -194,4 +194,112 @@ router.post('/calls/tools/log-analytics', requireVoiceSecret, asyncHandler(async
   return res.json({ status: 'logged' });
 }));
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /v1/calls/analytics
+// Internal-only analytics dashboard endpoint.
+// Requires x-admin-token or x-voice-secret header.
+// Filters: tenant_id (required), project_id, from, to (ISO dates), limit
+// ─────────────────────────────────────────────────────────────────────────────
+const config2 = config; // alias to avoid re-require
+
+function requireAnalyticsAuth(req, res, next) {
+  const adminToken = req.headers['x-admin-token'] || req.headers['authorization']?.replace('Bearer ', '');
+  const voiceSecret = req.headers['x-voice-secret'];
+  const validAdmin = config2.adminToken && adminToken === config2.adminToken;
+  const validVoice = config2.voiceSecret && voiceSecret === config2.voiceSecret;
+  if (!validAdmin && !validVoice) {
+    // If neither secret is configured, allow in dev
+    if (config2.adminToken || config2.voiceSecret) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+  return next();
+}
+
+router.get('/calls/analytics', requireAnalyticsAuth, asyncHandler(async (req, res) => {
+  const { tenant_id, project_id, from, to, limit = 500 } = req.query;
+
+  if (!tenant_id) {
+    return res.status(400).json({ error: 'tenant_id is required' });
+  }
+
+  const params = [tenant_id];
+  let filters = `WHERE ca.tenant_id = $1`;
+
+  if (project_id) {
+    params.push(project_id);
+    filters += ` AND ca.project_id = $${params.length}`;
+  }
+  if (from) {
+    params.push(from);
+    filters += ` AND ca.created_at >= $${params.length}`;
+  }
+  if (to) {
+    params.push(to);
+    filters += ` AND ca.created_at <= $${params.length}`;
+  }
+
+  params.push(Math.min(parseInt(limit, 10) || 500, 1000));
+
+  const rows = await db.query(
+    `SELECT ca.*, l.name AS lead_name, l.phone AS lead_phone
+     FROM call_analytics ca
+     LEFT JOIN leads l ON ca.lead_id = l.id
+     ${filters}
+     ORDER BY ca.created_at DESC
+     LIMIT $${params.length}`,
+    params
+  );
+
+  const data = rows.rows;
+  const total = data.length;
+
+  // Compute aggregates
+  const connected = data.filter((r) => r.pickup_confirmed);
+  const pickupRate = total > 0 ? ((connected.length / total) * 100).toFixed(1) : 0;
+  const durations = data.map((r) => r.talk_duration_seconds || 0).filter(Boolean);
+  const avgDuration = durations.length
+    ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+    : 0;
+  const outcomes = data.reduce((acc, r) => {
+    if (r.outcome) acc[r.outcome] = (acc[r.outcome] || 0) + 1;
+    return acc;
+  }, {});
+  const appointments = data.filter((r) => r.appointment_booked).length;
+  const avgToolCalls = total > 0
+    ? (data.reduce((a, r) => a + (r.tool_call_count || 0), 0) / total).toFixed(1)
+    : 0;
+  const avgSilence = total > 0
+    ? (data.reduce((a, r) => a + (r.silence_count || 0), 0) / total).toFixed(1)
+    : 0;
+  const avgBargeIn = total > 0
+    ? (data.reduce((a, r) => a + (r.barge_in_count || 0), 0) / total).toFixed(1)
+    : 0;
+
+  return res.json({
+    summary: {
+      total_calls: total,
+      pickup_rate_pct: Number(pickupRate),
+      avg_talk_duration_seconds: avgDuration,
+      appointments_booked: appointments,
+      avg_tool_calls_per_call: Number(avgToolCalls),
+      avg_silence_events: Number(avgSilence),
+      avg_barge_in_events: Number(avgBargeIn),
+      outcomes,
+    },
+    calls: data,
+  });
+}));
+
+// GET /v1/calls/usage/:tenantId — tenant usage summary for billing dashboard
+router.get('/calls/usage/:tenantId', requireAnalyticsAuth, asyncHandler(async (req, res) => {
+  const { tenantId } = req.params;
+  const { month } = req.query; // YYYY-MM-DD optional
+
+  const { getTenantUsage } = require('../services/usageTracker');
+  const usage = await getTenantUsage(tenantId, month || undefined);
+
+  return res.json({ usage: usage || {}, tenant_id: tenantId });
+}));
+
 module.exports = router;

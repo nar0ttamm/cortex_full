@@ -767,12 +767,42 @@ def _has_non_latin(text: str) -> bool:
     return False
 
 
+_HINDI_STOPWORDS = frozenset([
+    "main", "hoon", "aap", "kya", "hai", "nahi", "nahin", "mujhe", "humara",
+    "samajh", "gaya", "theek", "bilkul", "achha", "shukriya", "karein",
+    "lekin", "bahut", "abhi", "ji", "haan", "agar", "toh", "bhi", "aur",
+])
+
+_GERMAN_STOPWORDS = frozenset([
+    "ich", "nicht", "ist", "bitte", "danke", "nein", "wie", "was", "das",
+    "ein", "eine", "mit", "und", "der", "die", "sie", "haben", "mochte",
+])
+
+def _needs_translation(transcript: str) -> bool:
+    """Return True if the transcript requires GPT translation to English."""
+    if not transcript.strip():
+        return False
+    # Non-Latin script always needs translation
+    if _has_non_latin(transcript):
+        return True
+    # Check for Hindi/German stop words in Latin script
+    words = set(transcript.lower().split())
+    hindi_hits = len(words & _HINDI_STOPWORDS)
+    german_hits = len(words & _GERMAN_STOPWORDS)
+    return hindi_hits >= 3 or german_hits >= 2
+
+
 async def _normalize_transcript(transcript: str) -> str:
-    """Phase 19: Translate full transcript to English for CRM display."""
+    """Phase 19: Translate transcript to English only when non-English content detected.
+    Skips GPT call for pure-English transcripts to save cost."""
     if not transcript.strip():
         return transcript
 
-    logger.info("[transcript] Translating transcript to English...")
+    if not _needs_translation(transcript):
+        logger.info("[transcript] Pure English detected — skipping translation")
+        return transcript
+
+    logger.info("[transcript] Non-English content detected, translating to English...")
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))

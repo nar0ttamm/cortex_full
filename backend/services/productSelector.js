@@ -10,6 +10,69 @@ const db = require('../db');
 
 const MAX_INITIAL_PRODUCTS = 5;
 
+// ── Budget parsing helpers ────────────────────────────────────────────────────
+
+/**
+ * Extract a numeric value (in lakhs) from a budget string.
+ * e.g. "80 lakhs", "1.5 crore", "₹75L" → number
+ */
+function parseBudgetLakhs(str = '') {
+  if (!str) return null;
+  const s = str.toLowerCase().replace(/,/g, '');
+  const crore = s.match(/(\d+(?:\.\d+)?)\s*cr/);
+  if (crore) return parseFloat(crore[1]) * 100;
+  const lakh = s.match(/(\d+(?:\.\d+)?)\s*(?:l(?:ac|akh)?)/);
+  if (lakh) return parseFloat(lakh[1]);
+  const plain = s.match(/(\d{5,})/); // bare number ≥ 5 digits treated as rupees
+  if (plain) return parseInt(plain[1], 10) / 100000;
+  return null;
+}
+
+/**
+ * Extract min/max from a price_range string like "70-90 Lakhs" or "1.2-1.8 Cr".
+ */
+function parsePriceRange(str = '') {
+  if (!str) return null;
+  const s = str.toLowerCase().replace(/,/g, '');
+  const multi = s.match(/(\d+(?:\.\d+)?)\s*[-–to]+\s*(\d+(?:\.\d+)?)\s*(l|cr)/);
+  if (multi) {
+    const factor = multi[3] === 'cr' ? 100 : 1;
+    return { min: parseFloat(multi[1]) * factor, max: parseFloat(multi[2]) * factor };
+  }
+  const single = parseBudgetLakhs(str);
+  if (single) return { min: single * 0.85, max: single * 1.15 }; // ±15% tolerance
+  return null;
+}
+
+// ── Fuzzy location tokenizer ─────────────────────────────────────────────────
+
+/**
+ * Tokenize a location string into words for fuzzy matching.
+ * e.g. "Navi Mumbai" → ["navi", "mumbai"]
+ */
+function tokenizeLocation(str = '') {
+  return str.toLowerCase().split(/[\s,/-]+/).filter((w) => w.length > 2);
+}
+
+/**
+ * Compute location similarity score between lead location and product location.
+ * Full match = 3, partial token match = 1 per shared token (max 2), no match = 0.
+ */
+function locationScore(leadLoc, productLoc) {
+  if (!leadLoc || !productLoc) return 0;
+  const pLoc = productLoc.toLowerCase();
+  const lLoc = leadLoc.toLowerCase();
+
+  // Exact substring match
+  if (pLoc.includes(lLoc) || lLoc.includes(pLoc)) return 3;
+
+  // Token overlap
+  const leadTokens = tokenizeLocation(lLoc);
+  const prodTokens = tokenizeLocation(pLoc);
+  const shared = leadTokens.filter((t) => prodTokens.some((p) => p.includes(t) || t.includes(p)));
+  return Math.min(shared.length, 2);
+}
+
 /**
  * Score a single product against lead context using rule-based matching.
  * Returns a numeric score (higher = more relevant).
@@ -28,17 +91,14 @@ function scoreProduct(product, leadContext = {}) {
   } = leadContext;
 
   // Merge context field aliases
-  const loc = (preferred_location || lead_location || '').toLowerCase();
+  const loc = preferred_location || lead_location || '';
   const propType = (property_type || lead_property_type || '').toLowerCase();
-  const budgetHint = (budget || lead_budget || '').toLowerCase();
+  const budgetHint = budget || lead_budget || '';
   const possHint = (possession_preference || '').toLowerCase();
   const inquiryLower = (inquiry || '').toLowerCase();
 
-  // Location match (+3)
-  if (loc && product.location) {
-    const pLoc = product.location.toLowerCase();
-    if (pLoc.includes(loc) || loc.includes(pLoc)) score += 3;
-  }
+  // Fuzzy location match (+0–3)
+  score += locationScore(loc, product.location || '');
 
   // Property type match (+2)
   if (propType && product.property_type) {
@@ -52,13 +112,27 @@ function scoreProduct(product, leadContext = {}) {
     if (pPoss.includes(possHint) || possHint.includes(pPoss)) score += 2;
   }
 
-  // Budget mentioned and product has price (+1)
-  if (budgetHint && product.price_range) score += 1;
+  // Budget range compatibility (+2 if within range, +1 if budget exists and product has price)
+  if (budgetHint && product.price_range) {
+    const leadBudget = parseBudgetLakhs(budgetHint);
+    const priceRange = parsePriceRange(product.price_range);
+    if (leadBudget && priceRange) {
+      if (leadBudget >= priceRange.min && leadBudget <= priceRange.max) {
+        score += 2; // within range
+      } else if (leadBudget >= priceRange.min * 0.8) {
+        score += 1; // close to range
+      }
+    } else {
+      score += 1; // budget exists but can't parse — give small boost
+    }
+  }
 
-  // Inquiry keyword overlap with product name (+1)
-  if (inquiryLower && product.name) {
-    const pName = product.name.toLowerCase().split(' ')[0]; // first word
-    if (inquiryLower.includes(pName)) score += 1;
+  // Inquiry keyword overlap with product name/location (+1)
+  if (inquiryLower) {
+    const pName = (product.name || '').toLowerCase();
+    const pLoc = (product.location || '').toLowerCase();
+    if (pName.split(' ').some((w) => w.length > 3 && inquiryLower.includes(w))) score += 1;
+    if (tokenizeLocation(pLoc).some((t) => inquiryLower.includes(t))) score += 1;
   }
 
   return score;
@@ -87,14 +161,24 @@ async function selectProducts({ projectId, tenantId, leadContext = {}, limit = M
   const products = result.rows;
 
   if (products.length === 0) return [];
-  if (products.length <= limit) return products; // return all if within limit
+  if (products.length <= 3) return products; // always return all when few products
 
   // Score and rank
   const scored = products
     .map((p) => ({ ...p, _score: scoreProduct(p, leadContext) }))
     .sort((a, b) => b._score - a._score);
 
-  return scored.slice(0, limit).map(({ _score, ...p }) => p);
+  // Guarantee minimum 3 products — take top `limit` but at least 3
+  const topScored = scored.slice(0, limit).map(({ _score, ...p }) => p);
+  if (topScored.length >= 3) return topScored;
+
+  // Fallback: fill up to 3 with remaining products (unscored order)
+  const selected = [...topScored];
+  for (const { _score: _s, ...p } of scored) {
+    if (selected.length >= 3) break;
+    if (!selected.find((s) => s.id === p.id)) selected.push(p);
+  }
+  return selected;
 }
 
 /**

@@ -10,7 +10,20 @@ const {
 const { buildCallContext } = require('../services/callContextBuilder');
 const { selectProducts } = require('../services/productSelector');
 const { extractAndStoreIntent } = require('../services/leadIntentExtractor');
-const { trackCallOutcome } = require('../services/usageTracker');
+const { trackUsage, trackCallOutcome } = require('../services/usageTracker');
+const { scheduleRetry, updateQueueStatus, canAttemptLead } = require('../services/callQueueService');
+
+// Outcomes that should NOT trigger a retry
+const NO_RETRY_OUTCOMES = new Set([
+  'not_interested', 'wrong_number', 'appointment_booked',
+  'interested', 'callback', 'do_not_call',
+]);
+
+// Outcomes that ARE eligible for retry
+const RETRY_OUTCOMES = new Set([
+  'no_answer', 'user_busy', 'voicemail_or_machine', 'failed',
+  'dial_failed', 'technical_failure',
+]);
 
 const router = Router();
 
@@ -85,8 +98,8 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
   }
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // Track usage: call attempted (Phase 10)
-  void trackCallOutcome(tenant_id, { outcome: 'attempted', durationSeconds: 0 }).catch(() => {});
+  // Track attempt once — at start only; result handler tracks outcome separately
+  void trackUsage(tenant_id, 'calls_attempted').catch(() => {});
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25000);
@@ -290,7 +303,7 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
         console.error('[calls/result] post-commit notification failed:', notifErr.message);
       }
 
-      // Track usage (Phase 10)
+      // Track usage outcome (Phase 10) — attempt already counted at call start
       try {
         await trackCallOutcome(tenant_id, {
           outcome: outcome || 'unknown',
@@ -298,6 +311,49 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
         });
       } catch (usageErr) {
         console.warn('[calls/result] usage tracking failed:', usageErr.message);
+      }
+
+      // Phase 2: Retry logic — queue a second attempt for retryable outcomes
+      if (RETRY_OUTCOMES.has(outcome)) {
+        try {
+          // Find the call_queue entry by call_id or lead_id (queue-initiated calls)
+          const queueRow = await db.query(
+            `SELECT id, attempt_count, tenant_id FROM call_queue
+             WHERE (call_id = $1 OR lead_id = $2)
+               AND tenant_id = $3
+               AND status NOT IN ('cancelled', 'failed', 'max_attempts_reached', 'completed')
+             ORDER BY created_at DESC LIMIT 1`,
+            [call_id, lead_id, tenant_id]
+          );
+
+          if (queueRow.rows.length > 0) {
+            const qJob = queueRow.rows[0];
+            const canRetry = await canAttemptLead(lead_id);
+            if (canRetry) {
+              // Retry delay: no_answer → 2h, busy → 1h, voicemail → 3h
+              const delayMap = { no_answer: 120, user_busy: 60, voicemail_or_machine: 180 };
+              const delay = delayMap[outcome] || 120;
+              await scheduleRetry(qJob.id, delay);
+              console.log(`[calls/result] Retry scheduled for queue job ${qJob.id} in ${delay}min`);
+            } else {
+              await updateQueueStatus(qJob.id, 'max_attempts_reached', {
+                failureReason: `Max retries reached. Last outcome: ${outcome}`,
+              });
+            }
+          }
+        } catch (retryErr) {
+          console.warn('[calls/result] retry scheduling failed:', retryErr.message);
+        }
+      } else if (!NO_RETRY_OUTCOMES.has(outcome)) {
+        // Mark queue job as completed for terminal outcomes
+        try {
+          await db.query(
+            `UPDATE call_queue SET status = 'completed', updated_at = NOW()
+             WHERE (call_id = $1 OR lead_id = $2) AND tenant_id = $3
+               AND status NOT IN ('cancelled', 'completed')`,
+            [call_id, lead_id, tenant_id]
+          );
+        } catch { /* non-critical */ }
       }
     })();
 

@@ -61,19 +61,28 @@ async function trackUsage(tenantId, field, increment = 1) {
   }
 }
 
+// Minimum connected duration for billing (seconds)
+const MIN_BILLABLE_SECONDS = 10;
+
 /**
- * Track call duration (in minutes) — use for billing.
+ * Track call duration in billing units.
+ * Billing rule: round up to nearest 30 seconds, minimum MIN_BILLABLE_SECONDS.
+ * Stored as fractional minutes (e.g. 45s → 0.75 min).
  * @param {string} tenantId
  * @param {number} durationSeconds
  */
 async function trackCallMinutes(tenantId, durationSeconds) {
-  if (!tenantId || !durationSeconds) return;
-  const minutes = Math.ceil(durationSeconds / 60);
+  if (!tenantId || !durationSeconds || durationSeconds < MIN_BILLABLE_SECONDS) return;
+  // Round up to nearest 30s then convert to minutes
+  const rounded = Math.ceil(durationSeconds / 30) * 30;
+  const minutes = rounded / 60;
   await trackUsage(tenantId, 'call_minutes_used', minutes);
 }
 
 /**
- * Convenience: track a completed call with all relevant counters.
+ * Track a call outcome — call this ONCE per call result (from /calls/result).
+ * Does NOT increment calls_attempted — that is tracked at call start separately.
+ *
  * @param {string} tenantId
  * @param {object} opts
  * @param {string} opts.outcome
@@ -82,8 +91,6 @@ async function trackCallMinutes(tenantId, durationSeconds) {
  */
 async function trackCallOutcome(tenantId, { outcome, durationSeconds = 0, isDemo = false }) {
   if (!tenantId) return;
-
-  await trackUsage(tenantId, 'calls_attempted');
 
   if (isDemo) {
     await trackUsage(tenantId, 'demo_calls_used');
@@ -97,10 +104,10 @@ async function trackCallOutcome(tenantId, { outcome, durationSeconds = 0, isDemo
     if (noAnswerOutcomes.includes(outcome)) {
       await trackUsage(tenantId, 'no_answer_calls');
     }
-  } else {
-    // Connected call
-    await trackUsage(tenantId, 'calls_connected');
-    if (durationSeconds > 0) {
+  } else if (outcome && outcome !== 'unknown') {
+    // Connected call — only count if above minimum duration
+    if (durationSeconds >= MIN_BILLABLE_SECONDS) {
+      await trackUsage(tenantId, 'calls_connected');
       await trackCallMinutes(tenantId, durationSeconds);
     }
   }

@@ -1,6 +1,6 @@
 # CortexFlow — Project Status & Sell-Ready Checklist
 
-> Last updated: 5 May 2026 — V2 Phases 1–11 complete, code committed and deployed to Vercel.
+> Last updated: 6 May 2026 — V3 production-hardening complete (Phases 1–8 of stabilization sprint).
 
 **Legend:** `[x]` done · `[-]` partial / needs improvement · `[ ]` not started
 
@@ -419,7 +419,9 @@
 - [x] MAX_CONCURRENT_CALLS = 3 (configurable via env)
 - [x] MAX_ATTEMPTS_PER_DAY = 2 per lead
 - [x] Statuses: queued|processing|calling|completed|failed|no_answer|busy|retry_scheduled|cancelled
-- [ ] Queue worker cron (Vercel Cron) — PENDING integration into existing callScheduler
+- [x] **Queue worker Vercel Cron implemented** — `GET /v1/internal/queue-worker` (every minute)
+- [x] Worker uses `SELECT FOR UPDATE SKIP LOCKED` — idempotent, race-condition safe
+- [x] `vercel.json` updated with 3 cron jobs: queue-worker (*/1min), process-pending-calls (*/1min), process-reminders (0 * * * *)
 
 ---
 
@@ -438,9 +440,13 @@
 - [x] `tenant_usage` table created (via migration)
 - [x] `backend/services/usageTracker.js` created
 - [x] Tracked per tenant/month: calls_attempted, calls_connected, call_minutes_used, demo_calls_used, failed_calls, no_answer_calls, whatsapp_messages_sent, emails_sent, appointments_booked, callbacks_scheduled, ai_input_tokens_estimated, ai_output_tokens_estimated
-- [x] `trackCallOutcome()` — convenience function called in `/v1/calls/result`
+- [x] `trackCallOutcome()` — called in `/v1/calls/result` (outcome only, no double-counting)
+- [x] `calls_attempted` tracked once at call start via `trackUsage()` directly
+- [x] **Billing gate**: only connected calls ≥ 10s are counted as `calls_connected`
+- [x] **Billing rounding**: duration rounded up to nearest 30s before converting to minutes
 - [x] Plan limits (Starter/Growth/Enterprise) — structure ready, limits as placeholders
 - [x] `getTenantUsage()` for admin/billing queries
+- [x] `GET /v1/calls/usage/:tenantId` — usage summary endpoint (admin/voice-secret auth)
 
 ---
 
@@ -531,14 +537,22 @@
 - [x] `POST /v1/calls/tools/log-analytics` endpoint created
 - [x] Agent logs: tool_call_count, silence_count, filler_phrase_count, appointment_booked, callback_scheduled, outcome, talk_duration_seconds
 - [x] `log_analytics()` called at end of every call session
-- [x] Internal only — not exposed to tenant CRM yet
+- [x] **`GET /v1/calls/analytics`** — internal analytics query endpoint with filters:
+  - tenant_id (required), project_id, from, to (ISO dates), limit
+  - Returns: pickup_rate_pct, avg_talk_duration_seconds, appointments_booked, avg_tool_calls, avg_silence_events, avg_barge_in_events, outcome breakdown
+  - Auth: x-admin-token or x-voice-secret
 
 ---
 
 ## PHASE 19 — TRANSCRIPT NORMALIZATION PRESERVATION
 
-- [x] Already implemented in V2 Phase 11 — preserved as-is
 - [x] `_has_non_latin()` + `_normalize_transcript()` retained in refactored agent
+- [x] **Smart language detection** — `_needs_translation()` checks for non-Latin script OR Hindi/German stop words before calling GPT
+- [x] Pure-English transcripts skip GPT call entirely (cost saving)
+- [x] Hindi stop word list: 20 common words (main, hoon, aap, kya, hai, …)
+- [x] German stop word list: 15 common words (ich, nicht, ist, bitte, …)
+- [x] Threshold: ≥3 Hindi hits OR ≥2 German hits → translate
+- [x] Full translation to natural English (not just script conversion)
 
 ---
 
@@ -640,12 +654,67 @@ curl http://localhost:5000/health
 
 ---
 
+## V3 PRODUCTION HARDENING SPRINT — 6 May 2026
+
+### Phase H1 — Queue Worker
+- [x] `runQueueWorker()` implemented in `backend/routes/internal.js`
+- [x] Uses `SELECT FOR UPDATE SKIP LOCKED` — no duplicate processing under concurrent crons
+- [x] `GET/POST /v1/internal/queue-worker` endpoint wired
+- [x] Vercel Cron fires every minute; respects MAX_CONCURRENT_CALLS capacity gate
+- [x] Transient errors (ECONNREFUSED, timeout) → retry in 30min; permanent errors → mark failed
+
+### Phase H2 — Retry Logic Hardening
+- [x] `calls/result` now triggers retry for: `no_answer`, `user_busy`, `voicemail_or_machine`, `failed`, `dial_failed`, `technical_failure`
+- [x] NO_RETRY_OUTCOMES: `not_interested`, `wrong_number`, `appointment_booked`, `interested`, `callback`, `do_not_call`
+- [x] Retry delay varies by outcome: `no_answer` → 2h, `user_busy` → 1h, `voicemail` → 3h
+- [x] `canAttemptLead()` enforces max 2 retries/day before marking `max_attempts_reached`
+- [x] Terminal successful outcomes mark queue job as `completed`
+
+### Phase H3 — Usage Tracking Fix
+- [x] Eliminated double-counting of `calls_attempted` (was incremented twice per call)
+- [x] `calls_attempted` now tracked ONCE at call start via `trackUsage()` directly
+- [x] `trackCallOutcome()` no longer increments `calls_attempted`
+- [x] Billing gate: calls < 10 seconds do NOT count as `calls_connected` or `call_minutes_used`
+- [x] Billing rounding: duration rounded UP to nearest 30s → converted to fractional minutes
+
+### Phase H4 — Transcript Cost Optimization
+- [x] `_needs_translation()` added — detects Hindi (≥3 stop words) or German (≥2 stop words) before calling GPT
+- [x] Non-Latin script always triggers translation
+- [x] Pure English transcripts skip GPT — saves ~$0.001–0.003 per call
+- [x] Falls back to raw transcript if GPT translation fails
+
+### Phase H5 — Internal Analytics API
+- [x] `GET /v1/calls/analytics` — aggregated call quality dashboard endpoint
+- [x] Filters: tenant_id, project_id, from/to date, limit
+- [x] Summary: pickup_rate_pct, avg_talk_duration_seconds, avg_tool_calls, avg_silence_events, outcome breakdown
+- [x] Auth: x-admin-token or x-voice-secret
+- [x] `GET /v1/calls/usage/:tenantId` — monthly billing summary
+
+### Phase H6 — Product Selector Improvements
+- [x] Fuzzy location matching — tokenizes location names, scores partial token overlap
+- [x] Budget range parsing — extracts numeric lakhs/crores from text; checks against product price_range
+- [x] Budget compatibility scoring: exact match +2, close match +1
+- [x] Keyword expansion — matches inquiry keywords against product name tokens AND location tokens
+- [x] Guaranteed minimum 3 products — fallback fills from project catalog if scored results < 3
+
+### Phase H7 — Project Isolation Security Hardening
+- [x] `callContextBuilder.js`: `lead_context` query now scoped by `tenant_id`
+- [x] `callContextBuilder.js`: `calls` query now scoped by `tenant_id`
+- [x] `callContextBuilder.js`: `appointments` query now scoped by `tenant_id`
+- [x] `callTools.js`: project ownership verified before every product query
+- [x] `callTools.js`: lead ownership verified before memory update
+- [x] `callTools.js`: all endpoints require `x-voice-secret`
+- [x] Audit result: no cross-tenant data leakage possible on any endpoint
+
+---
+
 ## KNOWN RISKS + NOTES
 
-- **Call queue worker not yet wired to Vercel Cron** — `callQueueService.js` is ready but not yet integrated into `backend/jobs/callScheduler.js`. The cron still uses the existing lead metadata `scheduled_call_at` approach. Wiring queue to cron is next step.
-- **ElevenLabs TTS for groq mode only** — Realtime mode uses OpenAI's built-in TTS. ElevenLabs applies to groq mode via `voiceSynthesis.ts`.
-- **Silero VAD params** — The `min_speech_duration` and `min_silence_duration` parameters may not be exposed in the installed version of `livekit-agents`. If Python agent fails to start, remove those params and only adjust `threshold`.
-- **Agent tool proxy** — `BACKEND_URL` env var must be set on the GCP VM for tool proxy to work. Verify after VM deployment.
-- **RLS disabled** — All 19 Supabase tables (incl. new V3 tables) have RLS disabled. This is intentional for the server-side-only access pattern but should be addressed before multi-tenant public launch.
+- **ElevenLabs TTS for groq mode only** — Realtime mode uses OpenAI's built-in TTS. ElevenLabs applies to groq mode via `voiceSynthesis.ts`. ELEVENLABS_API_KEY not yet required.
+- **Silero VAD params** — `min_speech_duration` and `min_silence_duration` may not be exposed in installed `livekit-agents` version. If agent fails to start, remove those params and only adjust `threshold`.
+- **Agent tool proxy** — `BACKEND_URL` env var must be set on the GCP VM for tool proxy to work.
+- **RLS disabled** — All Supabase tables have RLS disabled (intentional for server-side-only access). Address before multi-tenant public launch.
+- **GCP VM has ephemeral IP** — If VM restarts, `VOICE_SERVICE_URL` in Vercel must be updated. Fix: assign a static IP in GCP (~₹600/month).
+- **Telnyx balance** — Minimum $5 balance required for outbound calls. Monitor balance before client demos.
 
 *V3 is additive — all V1/V2 functionality remains intact.*

@@ -67,30 +67,30 @@ async function buildCallContext({ tenantId, leadId }) {
   let leadCtx = null;
   try {
     const lcResult = await db.query(
-      `SELECT * FROM lead_context WHERE lead_id = $1`,
-      [leadId]
+      `SELECT * FROM lead_context WHERE lead_id = $1 AND tenant_id = $2`,
+      [leadId, tenantId]
     );
     leadCtx = lcResult.rows[0] || null;
   } catch (_) {
     /* lead_context table may not exist in very old deploys — safe fallback */
   }
 
-  // ── 6. Previous calls (for follow-up context) ─────────────────────────────────
+  // ── 6. Previous calls (for follow-up context) — scoped to tenant ──────────────
   const prevCallsResult = await db.query(
     `SELECT c.id, c.outcome, c.duration_seconds, c.ended_at, ct.summary
      FROM calls c
      LEFT JOIN call_transcripts ct ON c.id = ct.call_id
-     WHERE c.lead_id = $1 AND c.status = 'completed'
+     WHERE c.lead_id = $1 AND c.tenant_id = $2 AND c.status = 'completed'
      ORDER BY c.ended_at DESC NULLS LAST LIMIT 3`,
-    [leadId]
+    [leadId, tenantId]
   );
   const prevCalls = prevCallsResult.rows;
 
-  // ── 7. Last appointment ────────────────────────────────────────────────────────
+  // ── 7. Last appointment — scoped to tenant ────────────────────────────────────
   const apptResult = await db.query(
     `SELECT scheduled_at, status, notes FROM appointments
-     WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1`,
-    [leadId]
+     WHERE lead_id = $1 AND tenant_id = $2 ORDER BY created_at DESC LIMIT 1`,
+    [leadId, tenantId]
   );
   const lastAppt = apptResult.rows[0] || null;
 

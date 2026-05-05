@@ -11,5 +11,19 @@
       "src": "/(.*)",
       "dest": "server.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/v1/internal/queue-worker",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/v1/internal/process-pending-calls",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/v1/internal/process-reminders",
+      "schedule": "0 * * * *"
+    }
   ]
 }
