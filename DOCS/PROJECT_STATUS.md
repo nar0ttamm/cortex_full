@@ -717,4 +717,20 @@ curl http://localhost:5000/health
 - **GCP VM has ephemeral IP** — If VM restarts, `VOICE_SERVICE_URL` in Vercel must be updated. Fix: assign a static IP in GCP (~₹600/month).
 - **Telnyx balance** — Minimum $5 balance required for outbound calls. Monitor balance before client demos.
 
+---
+
+## EXTERNAL CRON SETUP (required — Vercel Hobby plan limit)
+
+Vercel Hobby only supports daily crons. The queue worker and call scheduler need to run every minute.
+Use [cron-job.org](https://cron-job.org) (free) to call these endpoints every minute:
+
+| Endpoint | Schedule | Purpose |
+|---|---|---|
+| `GET https://cortex-backend-api.vercel.app/v1/internal/queue-worker` | Every 1 min | Consume call_queue |
+| `GET https://cortex-backend-api.vercel.app/v1/internal/process-pending-calls` | Every 1 min | Legacy scheduler |
+
+Header to add: `Authorization: Bearer <CRON_SECRET>` (if CRON_SECRET is set in Vercel)
+
+---
+
 *V3 is additive — all V1/V2 functionality remains intact.*
