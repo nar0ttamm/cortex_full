@@ -59,6 +59,26 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
     return res.status(503).json({ error: 'Voice service not configured. Set VOICE_SERVICE_URL or LIVEKIT_URL env var.' });
   }
 
+  // ── Idempotency guard: atomically claim the lead for calling ─────────────────
+  // Uses a conditional UPDATE so concurrent requests are serialised at the DB level.
+  // Any request that loses the race gets a 409 — no duplicate SIP calls.
+  const guard = await db.query(
+    `UPDATE leads
+     SET metadata    = COALESCE(metadata, '{}') || '{"ai_call_status":"In Progress"}'::jsonb,
+         updated_at  = NOW()
+     WHERE id        = $1
+       AND tenant_id = $2
+       AND COALESCE(metadata->>'ai_call_status', '') != 'In Progress'
+     RETURNING id`,
+    [lead_id, tenant_id]
+  );
+  if (guard.rowCount === 0) {
+    return res.status(409).json({
+      error: 'A call is already in progress for this lead. Please wait for it to complete before starting another.',
+    });
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
   // ── V3: Build compact call brief using context builder + product selector ────
   let call_brief = null;
   try {
@@ -137,17 +157,24 @@ router.post('/calls/start', asyncHandler(async (req, res) => {
     const result = await response.json();
 
     await db.query(
-      `UPDATE leads SET metadata = jsonb_set(
-        COALESCE(metadata, '{}'),
-        '{call_initiated}',
-        'true'::jsonb
-      ), updated_at = NOW() WHERE id = $1`,
+      `UPDATE leads
+       SET metadata   = COALESCE(metadata, '{}') || '{"call_initiated":true}'::jsonb,
+           updated_at = NOW()
+       WHERE id = $1`,
       [lead_id]
     );
 
     return res.json({ status: 'initiated', call_id: result.call_id, lead_id });
   } catch (err) {
     clearTimeout(timeout);
+    // Release the in-progress lock so the operator can retry manually
+    await db.query(
+      `UPDATE leads
+       SET metadata   = COALESCE(metadata, '{}') || '{"ai_call_status":"Failed"}'::jsonb,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [lead_id]
+    ).catch(() => {});
     if (err.name === 'AbortError') {
       return res.status(504).json({ error: 'Voice service timeout' });
     }
