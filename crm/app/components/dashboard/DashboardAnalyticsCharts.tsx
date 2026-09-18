@@ -162,7 +162,7 @@ export function DashboardAnalyticsCharts({ analytics }: Props) {
     const dark = document.documentElement.classList.contains('dark');
     toPng(root as HTMLElement, {
       pixelRatio: 2,
-      backgroundColor: dark ? '#1e293b' : '#ffffff',
+              backgroundColor: dark ? '#1a1714' : '#fffdf9',
     })
       .then((dataUrl) => {
         const a = document.createElement('a');
@@ -242,15 +242,15 @@ export function DashboardAnalyticsCharts({ analytics }: Props) {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total Leads" value={k.total} color="#3b82f6" />
+        <StatCard label="Total Leads" value={k.total} color="#e24b1b" />
         <StatCard
           label="Interested"
           value={k.interested}
           sub={`${k.total > 0 ? Math.round((k.interested / k.total) * 100) : 0}% of total`}
-          color="#8b5cf6"
+          color="#1a6b63"
         />
-        <StatCard label="Confirmed" value={k.converted} color="#10b981" />
-        <StatCard label="Conversion Rate" value={`${k.conversionRate}%`} sub="New → Confirmed" color="#14b8a6" />
+        <StatCard label="Confirmed" value={k.converted} color="#c4841d" />
+        <StatCard label="Conversion Rate" value={`${k.conversionRate}%`} sub="New → Confirmed" color="#e24b1b" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">

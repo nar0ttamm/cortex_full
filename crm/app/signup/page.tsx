@@ -4,6 +4,8 @@ import { useState, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import { BrandMark } from '../components/BrandMark';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 const INDUSTRIES = [
   'Real Estate',
@@ -76,10 +78,10 @@ function StepIndicator({ step }: { step: number }) {
           <div
             className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
               s < step
-                ? 'bg-teal-500 text-white'
+                ? 'bg-[var(--accent)] text-white'
                 : s === step
-                ? 'bg-teal-500/20 text-teal-400 border border-teal-500/50'
-                : 'bg-slate-800 text-slate-500 border border-slate-700'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)]/40'
+                : 'bg-[var(--bg)] text-[var(--fg-muted)] border border-[var(--border)]'
             }`}
           >
             {s < step ? (
@@ -91,11 +93,11 @@ function StepIndicator({ step }: { step: number }) {
             )}
           </div>
           {s < 3 && (
-            <div className={`w-12 h-px ${s < step ? 'bg-teal-500' : 'bg-slate-700'}`} />
+            <div className={`w-12 h-px ${s < step ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`} />
           )}
         </div>
       ))}
-      <div className="ml-3 text-xs text-slate-500">
+      <div className="ml-3 text-xs text-[var(--fg-muted)]">
         {step === 1 && 'Your details'}
         {step === 2 && 'Company info'}
         {step === 3 && 'Choose plan'}
@@ -112,17 +114,17 @@ function InputField({
 }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-        {label} {required && <span className="text-teal-400">*</span>}
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">
+        {label} {required && <span className="text-[var(--accent)]">*</span>}
       </label>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full px-4 py-3 bg-slate-800/70 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500/50 transition-all"
+        className="cf-input"
       />
-      {hint && <p className="mt-1 text-[11px] text-slate-500">{hint}</p>}
+      {hint && <p className="mt-1 text-[11px] text-[var(--fg-muted)]">{hint}</p>}
     </div>
   );
 }
@@ -223,21 +225,24 @@ function OnboardingForm() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center px-4 py-12 relative overflow-hidden">
-      <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-teal-500/5 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-cyan-500/5 blur-[100px] pointer-events-none" />
+    <div className="relative min-h-screen overflow-hidden bg-[var(--bg)] px-4 py-12">
+      <div className="pointer-events-none absolute -left-[10%] top-[-18%] h-[520px] w-[520px] rounded-full bg-[var(--accent-soft)] blur-[120px]" />
+      <div className="pointer-events-none absolute -right-[8%] bottom-[-16%] h-[420px] w-[420px] rounded-full bg-[var(--teal-soft)] blur-[100px]" />
 
-      <div className="relative z-10 w-full max-w-lg">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-400 to-cyan-600 shadow-xl shadow-teal-900/50 mb-4">
-            <span className="text-white font-bold text-xl">CF</span>
+      <div className="absolute right-4 top-4 z-20">
+        <ThemeToggle />
+      </div>
+      <div className="relative z-10 mx-auto w-full max-w-lg">
+        <div className="mb-8 text-center">
+          <div className="mb-5 flex justify-center">
+            <BrandMark href="/" />
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Get started with CortexFlow</h1>
-          <p className="text-sm text-slate-400 mt-1">Set up your AI-powered CRM in under a minute</p>
+          <p className="eyebrow mx-auto">Onboarding</p>
+          <h1 className="mt-3 font-serif text-4xl leading-tight">Get started.</h1>
+          <p className="mt-2 text-sm text-[var(--fg-muted)]">Set up your AI-powered CRM in under a minute</p>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+        <div className="cf-card p-8 shadow-[var(--shadow-md)]">
           <StepIndicator step={step} />
 
           {error && (
@@ -248,13 +253,13 @@ function OnboardingForm() {
 
           {step === 1 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-white mb-4">Tell us about you</h2>
-              <InputField label="Full Name" value={data.fullName} onChange={set('fullName')} placeholder="Rahul Sharma" required />
+              <h2 className="mb-4 font-serif text-2xl text-[var(--fg)]">Tell us about you</h2>
+              <InputField label="Full Name" value={data.fullName} onChange={set('fullName')} placeholder="Your name" required />
               <InputField label="Company Name" value={data.companyName} onChange={set('companyName')} placeholder="Acme Real Estate" required />
               <InputField label="Phone Number" type="tel" value={data.phone} onChange={set('phone')} placeholder="+91 98765 43210" required hint="Include country code" />
-              <InputField label="Email" type="email" value={data.email} onChange={set('email')} placeholder="rahul@company.com" required />
+              <InputField label="Email" type="email" value={data.email} onChange={set('email')} placeholder="you@company.com" required />
               <InputField label="Password" type="password" value={data.password} onChange={set('password')} placeholder="••••••••" required hint="At least 6 characters" />
-              <button onClick={nextStep} className="w-full py-3.5 bg-gradient-to-r from-teal-500 to-cyan-600 text-white rounded-xl font-semibold text-sm hover:from-teal-400 hover:to-cyan-500 transition-all shadow-lg shadow-teal-900/40 mt-2">
+              <button onClick={nextStep} className="cf-btn-primary mt-2 w-full">
                 Continue →
               </button>
             </div>
@@ -262,16 +267,16 @@ function OnboardingForm() {
 
           {step === 2 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-white mb-4">About your company</h2>
+              <h2 className="mb-4 font-serif text-2xl text-[var(--fg)]">About your company</h2>
               <InputField label="Your Position / Role" value={data.position} onChange={set('position')} placeholder="Sales Manager, CEO, etc." required />
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Industry <span className="text-teal-400">*</span>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">
+                  Industry <span className="text-[var(--accent)]">*</span>
                 </label>
                 <select
                   value={data.industry}
                   onChange={(e) => set('industry')(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-800/70 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500/50 transition-all"
+                  className="cf-input"
                 >
                   <option value="">Select industry…</option>
                   {INDUSTRIES.map((ind) => (
@@ -282,10 +287,10 @@ function OnboardingForm() {
               <InputField label="Address" value={data.address} onChange={set('address')} placeholder="Mumbai, Maharashtra" hint="City, State or full address" />
               <InputField label="GSTIN" value={data.gstin} onChange={set('gstin')} placeholder="Optional" hint="Optional — for GST invoicing" />
               <div className="flex gap-3 pt-2">
-                <button onClick={() => setStep(1)} className="flex-1 py-3 border border-slate-700 text-slate-400 rounded-xl text-sm hover:border-slate-600 hover:text-slate-300 transition">
+                <button onClick={() => setStep(1)} className="cf-btn-secondary flex-1">
                   ← Back
                 </button>
-                <button onClick={nextStep} className="flex-[2] py-3 bg-gradient-to-r from-teal-500 to-cyan-600 text-white rounded-xl font-semibold text-sm hover:from-teal-400 hover:to-cyan-500 transition-all shadow-lg shadow-teal-900/40">
+                <button onClick={nextStep} className="cf-btn-primary flex-[2]">
                   Continue →
                 </button>
               </div>
@@ -294,16 +299,16 @@ function OnboardingForm() {
 
           {step === 3 && (
             <form onSubmit={handleSubmit}>
-              <h2 className="text-lg font-semibold text-white mb-1">Choose your plan</h2>
-              <p className="text-xs text-slate-400 mb-5">All plans start with a <span className="text-teal-400 font-semibold">3-day free trial</span>. No credit card required.</p>
+              <h2 className="mb-1 font-serif text-2xl text-[var(--fg)]">Choose your plan</h2>
+              <p className="mb-5 text-xs text-[var(--fg-muted)]">All plans start with a <span className="font-semibold text-[var(--accent)]">3-day free trial</span>. No credit card required.</p>
               <div className="space-y-3 mb-6">
                 {PLANS.map((plan) => (
                   <label
                     key={plan.id}
                     className={`relative flex items-start gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
                       data.plan === plan.id
-                        ? 'border-teal-500/60 bg-teal-500/10'
-                        : 'border-slate-700 bg-slate-800/40 hover:border-slate-600'
+                        ? 'border-[var(--accent)]/50 bg-[var(--accent-soft)]'
+                        : 'border-[var(--border)] bg-[var(--bg)] hover:border-[var(--accent)]/30'
                     }`}
                   >
                     <input
@@ -315,24 +320,24 @@ function OnboardingForm() {
                       className="sr-only"
                     />
                     <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                      data.plan === plan.id ? 'border-teal-400 bg-teal-400' : 'border-slate-600'
+                      data.plan === plan.id ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-[var(--border)]'
                     }`}>
                       {data.plan === plan.id && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-white">{plan.name}</span>
+                        <span className="text-sm font-semibold text-[var(--fg)]">{plan.name}</span>
                         {plan.badge && (
-                          <span className="px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-400 text-[10px] font-bold uppercase tracking-wide">
+                          <span className="px-2 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] text-[10px] font-bold uppercase tracking-wide">
                             {plan.badge}
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-400 mt-0.5">{plan.tagline}</p>
+                      <p className="text-xs text-[var(--fg-muted)] mt-0.5">{plan.tagline}</p>
                       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
                         {plan.features.slice(0, 3).map((f) => (
-                          <span key={f} className="text-[11px] text-slate-400 flex items-center gap-1">
-                            <svg className="w-3 h-3 text-teal-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <span key={f} className="text-[11px] text-[var(--fg-muted)] flex items-center gap-1">
+                            <svg className="w-3 h-3 text-[var(--accent)] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                             </svg>
                             {f}
@@ -341,8 +346,8 @@ function OnboardingForm() {
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className="text-xs text-slate-500 line-through">—</div>
-                      <div className="text-sm font-bold text-teal-400">Free Trial</div>
+                      <div className="text-xs text-[var(--fg-muted)] line-through">—</div>
+                      <div className="text-sm font-bold text-[var(--accent)]">Free Trial</div>
                     </div>
                   </label>
                 ))}
@@ -352,14 +357,14 @@ function OnboardingForm() {
                 <button
                   type="button"
                   onClick={() => setStep(2)}
-                  className="flex-1 py-3 border border-slate-700 text-slate-400 rounded-xl text-sm hover:border-slate-600 hover:text-slate-300 transition"
+                  className="cf-btn-secondary flex-1"
                 >
                   ← Back
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="flex-[2] py-3.5 bg-gradient-to-r from-teal-500 to-cyan-600 text-white rounded-xl font-semibold text-sm hover:from-teal-400 hover:to-cyan-500 transition-all shadow-lg shadow-teal-900/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="cf-btn-primary flex-[2] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
@@ -377,9 +382,9 @@ function OnboardingForm() {
             </form>
           )}
 
-          <p className="mt-6 text-center text-sm text-slate-500">
+          <p className="mt-6 text-center text-sm text-[var(--fg-muted)]">
             Already have an account?{' '}
-            <Link href="/login" className="text-teal-400 hover:text-teal-300 font-medium transition-colors">
+            <Link href="/login" className="font-semibold text-[var(--accent)] hover:text-[var(--accent-hover)]">
               Sign in
             </Link>
           </p>
@@ -392,8 +397,8 @@ function OnboardingForm() {
 export default function SignupPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg)]">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
       </div>
     }>
       <OnboardingForm />

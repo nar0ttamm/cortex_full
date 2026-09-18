@@ -1,22 +1,30 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
+import { Instrument_Serif, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
-import { NotificationProvider } from './contexts/NotificationContext';
+import { NotificationProvider } from "./contexts/NotificationContext";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const jakarta = Plus_Jakarta_Sans({
+  variable: "--font-plus-jakarta",
   subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const instrument = Instrument_Serif({
+  variable: "--font-instrument",
   subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Cortex Flow - AI-Powered Lead Management",
-  description: "Intelligent CRM system for automated lead management, AI calling, and appointment scheduling",
+  title: "CortexFlow AI — CRM",
+  description:
+    "Intelligent CRM for automated lead management, AI calling, and appointment scheduling",
 };
+
+const themeBootScript = `try{if(localStorage.getItem('dark-mode')==='true'){document.documentElement.classList.add('dark')}}catch(e){}`;
 
 export default function RootLayout({
   children,
@@ -24,10 +32,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${jakarta.variable} ${instrument.variable} ${jakarta.className} antialiased`}>
+        <Script id="theme-boot" strategy="beforeInteractive">
+          {themeBootScript}
+        </Script>
         <NotificationProvider>{children}</NotificationProvider>
       </body>
     </html>

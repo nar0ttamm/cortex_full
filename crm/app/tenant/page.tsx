@@ -124,8 +124,8 @@ export default function TenantPage() {
   const inputCls = (disabled: boolean) =>
     `w-full px-4 py-2.5 border rounded-xl text-sm transition-all outline-none ${
       disabled
-        ? 'bg-slate-50 border-slate-100 text-slate-500 cursor-default'
-        : 'bg-white border-slate-200 text-slate-800 focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400'
+        ? 'bg-[var(--bg)] border-[var(--border)] text-[var(--fg-muted)] cursor-default'
+        : 'cf-input !py-2.5'
     }`;
 
   const actions = (
@@ -183,23 +183,23 @@ export default function TenantPage() {
       <div className="p-4 sm:p-6 lg:p-8">
 
         {/* Profile header card */}
-        <div className="bg-gradient-to-br from-teal-500 to-cyan-600 rounded-2xl shadow-lg p-6 sm:p-8 mb-6 relative overflow-hidden">
-          <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
-          <div className="relative flex flex-col sm:flex-row items-start sm:items-center gap-5">
-            <div className="w-20 h-20 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-xl shrink-0 border border-white/30">
-              <span className="text-white font-bold text-3xl">{initials}</span>
+        <div className="relative mb-6 overflow-hidden rounded-[1.5rem] bg-[var(--accent)] p-6 text-white shadow-[var(--shadow-md)] sm:p-8">
+          <div className="pointer-events-none absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
+          <div className="relative flex flex-col items-start gap-5 sm:flex-row sm:items-center">
+            <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-white/30 bg-white/15 font-serif text-3xl shadow-xl backdrop-blur-sm">
+              {initials}
             </div>
             <div className="min-w-0 flex-1">
-              <h2 className="text-xl sm:text-2xl font-bold text-white truncate">{form.name || 'My Business'}</h2>
-              <p className="text-teal-100 text-sm mt-1">{form.business_type || 'Business'} · {form.timezone}</p>
-              <p className="text-teal-200/70 text-xs mt-1 font-mono break-all">{tenantId || '—'}</p>
+              <h2 className="truncate font-serif text-2xl sm:text-3xl">{form.name || 'My Business'}</h2>
+              <p className="mt-1 text-sm text-white/85">{form.business_type || 'Business'} · {form.timezone}</p>
+              <p className="mt-1 break-all font-mono text-xs text-white/60">{tenantId || '—'}</p>
             </div>
             {!editing && (
               <button
                 onClick={() => setEditing(true)}
-                className="shrink-0 px-5 py-2 bg-white/20 hover:bg-white/30 text-white rounded-xl text-sm font-semibold transition-colors border border-white/30 backdrop-blur-sm"
+                className="shrink-0 rounded-full border border-white/30 bg-white/15 px-5 py-2 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-white/25"
               >
-                Edit Profile
+                Edit profile
               </button>
             )}
           </div>
@@ -212,14 +212,14 @@ export default function TenantPage() {
         )}
 
         {/* Form sections */}
-        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100">
-            <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-              <span className="w-1 h-4 bg-teal-500 rounded-full" />
+        <div className="cf-card overflow-hidden">
+          <div className="border-b border-[var(--border)] px-5 py-4">
+            <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--fg)]">
+              <span className="h-4 w-1 rounded-full bg-[var(--accent)]" />
               Business Profile
             </h3>
             {!editing && (
-              <p className="text-xs text-slate-400 mt-0.5">Click Edit to modify your tenant settings</p>
+              <p className="mt-0.5 text-xs text-[var(--fg-muted)]">Click Edit to modify your tenant settings</p>
             )}
           </div>
 
@@ -279,15 +279,15 @@ export default function TenantPage() {
         {/* Info cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-3 mt-4">
           {[
-            { icon: '👤', label: 'Owner', value: form.owner_name || 'Not set', color: 'bg-amber-50 border-amber-100' },
-            { icon: '📧', label: 'Lead Emails To', value: form.contact_email || 'Not set', color: 'bg-sky-50 border-sky-100' },
-            { icon: '💬', label: 'WhatsApp Alerts', value: form.whatsapp_number || 'Not set', color: 'bg-green-50 border-green-100' },
-            { icon: '⏱️', label: 'Call Delay', value: `${form.call_delay_seconds}s after lead entry`, color: 'bg-violet-50 border-violet-100' },
+            { icon: '👤', label: 'Owner', value: form.owner_name || 'Not set', color: 'bg-[var(--gold-soft)] border-[var(--border)]' },
+            { icon: '📧', label: 'Lead Emails To', value: form.contact_email || 'Not set', color: 'bg-[var(--teal-soft)] border-[var(--border)]' },
+            { icon: '💬', label: 'WhatsApp Alerts', value: form.whatsapp_number || 'Not set', color: 'bg-[var(--accent-soft)] border-[var(--border)]' },
+            { icon: '⏱️', label: 'Call Delay', value: `${form.call_delay_seconds}s after lead entry`, color: 'bg-[var(--bg-elevated)] border-[var(--border)]' },
           ].map(item => (
             <div key={item.label} className={`rounded-xl border p-4 ${item.color}`}>
               <p className="text-lg mb-1">{item.icon}</p>
-              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{item.label}</p>
-              <p className="text-xs font-semibold text-slate-700 mt-1 break-all">{item.value}</p>
+              <p className="text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-wide">{item.label}</p>
+              <p className="text-xs font-semibold text-[var(--fg)] mt-1 break-all">{item.value}</p>
             </div>
           ))}
         </div>

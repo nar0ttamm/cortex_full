@@ -3,12 +3,12 @@
 import type { DashboardAnalyticsPayload } from '@/types';
 
 const STATUS_COLOR: Record<string, string> = {
-  new: '#3b82f6',
-  interested: '#14b8a6',
-  appointment_scheduled: '#8b5cf6',
-  confirmed: '#10b981',
-  not_interested: '#ef4444',
-  closed: '#64748b',
+  new: '#1a6b63',
+  interested: '#e24b1b',
+  appointment_scheduled: '#c4841d',
+  confirmed: '#1a6b63',
+  not_interested: '#6b645b',
+  closed: '#a39b92',
 };
 
 const LABEL: Record<string, string> = {
@@ -20,7 +20,7 @@ const LABEL: Record<string, string> = {
   closed: 'Closed',
 };
 
-const SOURCE_PALETTE = ['#14b8a6', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#64748b'];
+const SOURCE_PALETTE = ['#e24b1b', '#1a6b63', '#c4841d', '#f06a3a', '#6b645b', '#3d9d93'];
 
 export function buildDashboardAnalytics(leads: any[]): DashboardAnalyticsPayload {
   const total = leads.length;
@@ -66,7 +66,7 @@ export function buildDashboardAnalytics(leads: any[]): DashboardAnalyticsPayload
   const trend = days.map((d) => ({
     label: d.split(' ')[0],
     value: byDay[d] || 0,
-    color: '#14b8a6',
+    color: '#e24b1b',
   }));
 
   const statusChart = Object.entries(LABEL)
@@ -86,21 +86,21 @@ export function buildDashboardAnalytics(leads: any[]): DashboardAnalyticsPayload
     }));
 
   const callChart = [
-    { label: 'Done', value: callsDone, color: '#10b981' },
-    { label: 'Pending', value: callsPending, color: '#f59e0b' },
-    { label: 'Failed', value: callsFailed, color: '#ef4444' },
+    { label: 'Done', value: callsDone, color: '#1a6b63' },
+    { label: 'Pending', value: callsPending, color: '#c4841d' },
+    { label: 'Failed', value: callsFailed, color: '#e24b1b' },
   ].filter((d) => d.value > 0);
 
   const funnel = [
-    { label: 'Total Leads', value: total, color: '#3b82f6' },
-    { label: 'Called', value: callsDone, color: '#14b8a6' },
-    { label: 'Interested', value: interested, color: '#8b5cf6' },
+    { label: 'Total Leads', value: total, color: '#e24b1b' },
+    { label: 'Called', value: callsDone, color: '#1a6b63' },
+    { label: 'Interested', value: interested, color: '#c4841d' },
     {
       label: 'Appt Scheduled',
       value: (byStatus.appointment_scheduled || 0) + (byStatus.confirmed || 0),
-      color: '#f59e0b',
+      color: '#f06a3a',
     },
-    { label: 'Confirmed', value: byStatus.confirmed || 0, color: '#10b981' },
+    { label: 'Confirmed', value: byStatus.confirmed || 0, color: '#1a6b63' },
   ];
 
   return {

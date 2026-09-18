@@ -164,14 +164,14 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
             collapsed ? 'px-0 py-2.5 justify-center' : 'px-3 py-2.5'
           } ${
             isActive
-              ? 'bg-teal-500/10 text-teal-400'
-              : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+              ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+              : 'text-[var(--fg-muted)] hover:bg-[var(--bg-warm)] hover:text-[var(--fg)]'
           }`}
         >
-          <span className={`relative ${isActive ? 'text-teal-400' : 'text-slate-500'}`}>
+          <span className={`relative ${isActive ? 'text-[var(--accent)]' : 'text-[var(--fg-muted)]'}`}>
             {item.icon}
             {showBadge && collapsed && (
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border border-slate-950" />
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border border-[var(--bg-elevated)]" />
             )}
           </span>
           {!collapsed && (
@@ -183,16 +183,16 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
             </span>
           )}
           {!collapsed && !showBadge && isActive && (
-            <span className="ml-auto w-1.5 h-1.5 rounded-full bg-teal-400 shrink-0" />
+            <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[var(--accent)] shrink-0" />
           )}
         </Link>
         {/* Tooltip when collapsed */}
         {collapsed && (
           <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-50 pointer-events-none opacity-0 group-hover/item:opacity-100 transition-opacity duration-150">
-            <div className="bg-slate-800 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-lg border border-slate-700 flex items-center gap-2">
+            <div className="bg-[var(--bg-ink)] text-[var(--bg)] text-xs font-medium px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-lg border border-[var(--border)] flex items-center gap-2">
               {item.label}
               {showBadge && <span className="bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{badge}</span>}
-              <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-slate-800" />
+              <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[var(--bg-ink)]" />
             </div>
           </div>
         )}
@@ -201,13 +201,13 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
   };
 
   return (
-    <div className={`h-full flex flex-col bg-slate-950 border-r border-slate-800/60 overflow-x-hidden transition-all duration-200 ${collapsed ? 'w-16' : 'w-[220px]'}`}>
+    <div className={`h-full flex flex-col bg-[var(--bg-elevated)] border-r border-[var(--border)] overflow-x-hidden transition-all duration-200 ${collapsed ? 'w-16' : 'w-[228px]'}`}>
 
       {/* Toggle button row */}
-      <div className={`flex items-center border-b border-slate-800/60 shrink-0 ${collapsed ? 'justify-center py-4' : 'justify-end px-3 py-3'}`}>
+      <div className={`flex items-center border-b border-[var(--border)] shrink-0 ${collapsed ? 'justify-center py-4' : 'justify-end px-3 py-3'}`}>
         <button
           onClick={onToggle}
-          className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors"
+          className="p-1.5 rounded-lg hover:bg-[var(--bg-warm)] text-[var(--fg-muted)] hover:text-[var(--fg)] transition-colors"
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 transition-transform duration-200" style={{ transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)' }}>
@@ -219,7 +219,7 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
       {/* Section label */}
       {!collapsed && (
         <div className="px-5 pt-4 pb-1 shrink-0">
-          <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest">Menu</p>
+          <p className="text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-[0.16em]">Menu</p>
         </div>
       )}
 
@@ -233,7 +233,7 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
         <div className="relative group/logout">
           <button
             onClick={handleLogout}
-            className={`w-full flex items-center gap-3 rounded-xl transition-all duration-150 text-slate-500 hover:bg-red-500/10 hover:text-red-400 ${
+            className={`w-full flex items-center gap-3 rounded-xl transition-all duration-150 text-[var(--fg-muted)] hover:bg-red-500/10 hover:text-red-500 ${
               collapsed ? 'px-0 py-2 justify-center' : 'px-3 py-2'
             }`}
           >
@@ -244,9 +244,9 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
           </button>
           {collapsed && (
             <div className="absolute left-full ml-3 bottom-1/2 translate-y-1/2 z-50 pointer-events-none opacity-0 group-hover/logout:opacity-100 transition-opacity duration-150">
-              <div className="bg-slate-800 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-lg border border-slate-700">
+              <div className="bg-[var(--bg-ink)] text-[var(--bg)] text-xs font-medium px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-lg border border-[var(--border)]">
                 Logout
-                <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-slate-800" />
+                <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[var(--bg-ink)]" />
               </div>
             </div>
           )}
@@ -254,7 +254,7 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
       </div>
 
       {/* Tenant profile button */}
-      <div className={`border-t border-slate-800/60 shrink-0 ${collapsed ? 'p-2' : 'p-3'}`}>
+      <div className={`border-t border-[var(--border)] shrink-0 ${collapsed ? 'p-2' : 'p-3'}`}>
         <div className="relative group/tenant">
           <Link
             href="/tenant"
@@ -263,23 +263,23 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
               collapsed ? 'px-0 py-2 justify-center' : 'px-3 py-2.5'
             } ${
               pathname === '/tenant'
-                ? 'bg-teal-500/10 text-teal-400'
-                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                : 'text-[var(--fg-muted)] hover:bg-[var(--bg-warm)] hover:text-[var(--fg)]'
             }`}
           >
-            <div className={`rounded-lg bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center shrink-0 font-bold text-white shadow-sm ${collapsed ? 'w-8 h-8 text-xs' : 'w-7 h-7 text-[11px]'}`}>
+            <div className={`rounded-lg bg-[var(--accent)] flex items-center justify-center shrink-0 font-bold text-white shadow-sm ${collapsed ? 'w-8 h-8 text-xs' : 'w-7 h-7 text-[11px]'}`}>
               {initials}
             </div>
             {!collapsed && (
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-slate-300 truncate leading-none">
+                <p className="text-xs font-semibold text-[var(--fg)] truncate leading-none">
                   {tenantName || 'My Business'}
                 </p>
-                <p className="text-[10px] text-slate-500 mt-0.5 leading-none">Settings</p>
+                <p className="text-[10px] text-[var(--fg-muted)] mt-0.5 leading-none">Settings</p>
               </div>
             )}
             {!collapsed && (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5 text-slate-600 shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5 text-[var(--fg-muted)] shrink-0">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
               </svg>
@@ -287,9 +287,9 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
           </Link>
           {collapsed && (
             <div className="absolute left-full ml-3 bottom-1/2 translate-y-1/2 z-50 pointer-events-none opacity-0 group-hover/tenant:opacity-100 transition-opacity duration-150">
-              <div className="bg-slate-800 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-lg border border-slate-700">
+              <div className="bg-[var(--bg-ink)] text-[var(--bg)] text-xs font-medium px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-lg border border-[var(--border)]">
                 {tenantName || 'My Business'} · Settings
-                <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-slate-800" />
+                <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[var(--bg-ink)]" />
               </div>
             </div>
           )}

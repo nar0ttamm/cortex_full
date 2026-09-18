@@ -1,60 +1,8 @@
-const { getCredentials } = require('./credentialService');
-const config = require('../config');
-
 /**
- * Initiate an outbound call via Exotel.
- * Credentials shape: { account_sid, api_key, api_token, virtual_number }
+ * Call result helpers — map post-call AI analysis to a normalized result
+ * string and a CRM lead status. Provider-agnostic (used by manual/CRM call
+ * events and the simulate route).
  */
-async function startExotelCall({ tenantId, phone }) {
-  const creds = await getCredentials(tenantId, 'exotel');
-  const authHeader =
-    'Basic ' + Buffer.from(`${creds.api_key}:${creds.api_token}`).toString('base64');
-
-  const form = new URLSearchParams({
-    From: creds.virtual_number,
-    To: phone,
-    CallerId: creds.virtual_number,
-    Url: `${config.backendUrl}/v1/call/flow`,
-    CallType: 'trans',
-    StatusCallback: `${config.backendUrl}/v1/call/status`,
-    Record: 'true',
-    TimeLimit: '300',
-  });
-
-  const res = await fetch(
-    `https://api.exotel.com/v1/Accounts/${creds.account_sid}/Calls/connect.json`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: authHeader,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: form.toString(),
-    }
-  );
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Exotel error: ${err.RestException?.Message || res.statusText}`);
-  }
-
-  return res.json();
-}
-
-/**
- * Generate TwiML XML for Exotel call flow.
- * Called when Exotel fetches instructions for an active call.
- */
-function generateCallFlowXML({ leadName }) {
-  const name = leadName || 'there';
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice" language="en-IN">Hello ${name}! This is an automated call from our team regarding your recent inquiry. Please speak after the beep and tell us your requirements. Our team will follow up with you shortly.</Say>
-  <Record maxLength="120" playBeep="true" finishOnKey="#" />
-  <Say voice="alice" language="en-IN">Thank you for your time. We will be in touch soon. Goodbye!</Say>
-  <Hangup/>
-</Response>`;
-}
 
 /**
  * Derive a human-readable call result from AI analysis.
@@ -80,4 +28,4 @@ function callResultToLeadStatus(callResult) {
   return map[callResult] || 'contacted';
 }
 
-module.exports = { startExotelCall, generateCallFlowXML, getCallResult, callResultToLeadStatus };
+module.exports = { getCallResult, callResultToLeadStatus };

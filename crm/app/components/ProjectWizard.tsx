@@ -59,7 +59,7 @@ function StepDot({ n, current }: { n: number; current: number }) {
   const active = n === current;
   return (
     <div className={`flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold transition-all ${
-      done ? 'bg-teal-500 text-white' : active ? 'border-2 border-teal-500 text-teal-400' : 'border border-slate-700 text-slate-500'
+      done ? 'bg-[var(--accent)] text-white' : active ? 'border-2 border-[var(--accent)] text-[var(--accent)]' : 'border border-[var(--border)] text-[var(--fg-muted)]'
     }`}>
       {done ? (
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -163,14 +163,14 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
       <div className="flex-1 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Drawer */}
-      <div className="w-full max-w-xl bg-slate-900 border-l border-slate-800 flex flex-col h-full shadow-2xl overflow-hidden">
+      <div className="flex h-full w-full max-w-xl flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)]">
         {/* Header */}
-        <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between shrink-0">
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-6 py-5">
           <div>
-            <h2 className="text-lg font-bold text-white">New Project</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Set up a new sales project</p>
+            <h2 className="font-serif text-2xl text-[var(--fg)]">New project</h2>
+            <p className="mt-0.5 text-xs text-[var(--fg-muted)]">Set up a new sales project</p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition">
+          <button onClick={onClose} className="rounded-lg p-2 text-[var(--fg-muted)] transition hover:bg-[var(--bg-warm)] hover:text-[var(--fg)]">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -178,14 +178,14 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
         </div>
 
         {/* Steps indicator */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center gap-3 shrink-0">
+        <div className="flex shrink-0 items-center gap-3 border-b border-[var(--border)] px-6 py-4">
           {[1, 2, 3, 4].map((n, i) => (
             <div key={n} className="flex items-center gap-3">
               <StepDot n={n} current={step} />
-              {i < 3 && <div className={`w-8 h-px ${n < step ? 'bg-teal-500' : 'bg-slate-700'}`} />}
+              {i < 3 && <div className={`h-px w-8 ${n < step ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`} />}
             </div>
           ))}
-          <span className="ml-2 text-xs text-slate-400">
+          <span className="ml-2 text-xs text-[var(--fg-muted)]">
             {step === 1 && 'Basic info'}
             {step === 2 && 'Lead source'}
             {step === 3 && 'Knowledge base'}
@@ -204,20 +204,20 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
           {/* Step 1: Basic Info */}
           {step === 1 && (
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-slate-300 mb-4">Project Details</h3>
+              <h3 className="mb-4 text-sm font-semibold text-[var(--fg)]">Project Details</h3>
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Project Name <span className="text-teal-400">*</span>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">
+                  Project Name <span className="text-[var(--accent)]">*</span>
                 </label>
                 <input
                   value={data.name}
                   onChange={e => setField('name', e.target.value)}
                   placeholder="e.g. Prestige Heights Q2 Campaign"
-                  className="w-full px-4 py-3 bg-slate-800/70 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500/50 transition-all"
+                  className="cf-input"
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">
                   Description
                 </label>
                 <textarea
@@ -225,7 +225,7 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
                   onChange={e => setField('description', e.target.value)}
                   placeholder="What is this project about? What are the goals?"
                   rows={4}
-                  className="w-full px-4 py-3 bg-slate-800/70 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500/50 transition-all resize-none"
+                  className="cf-input resize-none"
                 />
               </div>
             </div>
@@ -234,21 +234,21 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
           {/* Step 2: Lead Source */}
           {step === 2 && (
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-slate-300 mb-2">How will leads come in?</h3>
-              <p className="text-xs text-slate-400 mb-4">Select the primary lead source for this project. You can change this later.</p>
+              <h3 className="mb-2 text-sm font-semibold text-[var(--fg)]">How will leads come in?</h3>
+              <p className="mb-4 text-xs text-[var(--fg-muted)]">Select the primary lead source for this project. You can change this later.</p>
               <div className="grid grid-cols-2 gap-2">
                 {LEAD_SOURCES.map(src => (
                   <label
                     key={src.id}
                     className={`flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
                       data.leadSource === src.id
-                        ? 'border-teal-500/60 bg-teal-500/10 text-white'
-                        : 'border-slate-700 bg-slate-800/40 text-slate-400 hover:border-slate-600'
+                        ? 'border-[var(--accent)]/50 bg-[var(--accent-soft)] text-[var(--fg)]'
+                        : 'border-[var(--border)] bg-[var(--bg)] text-[var(--fg-muted)] hover:border-[var(--accent)]/30'
                     }`}
                   >
                     <input type="radio" name="leadSource" value={src.id} checked={data.leadSource === src.id} onChange={() => setField('leadSource', src.id)} className="sr-only" />
                     <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                      data.leadSource === src.id ? 'border-teal-400 bg-teal-400' : 'border-slate-600'
+                      data.leadSource === src.id ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-[var(--border)]'
                     }`}>
                       {data.leadSource === src.id && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                     </div>
@@ -258,8 +258,8 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
               </div>
               {data.leadSource === 'csv' && (
                 <div className="mt-4">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Upload CSV / Excel</label>
-                  <div className="border-2 border-dashed border-slate-700 rounded-xl p-6 text-center hover:border-teal-500/40 transition-colors">
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">Upload CSV / Excel</label>
+                  <div className="rounded-xl border-2 border-dashed border-[var(--border)] p-6 text-center transition-colors hover:border-[var(--accent)]/40">
                     <input
                       type="file"
                       accept=".csv,.xlsx,.xls"
@@ -268,11 +268,11 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
                       id="csv-upload"
                     />
                     <label htmlFor="csv-upload" className="cursor-pointer">
-                      <svg className="w-8 h-8 text-slate-500 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="mx-auto mb-2 h-8 w-8 text-[var(--fg-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                       </svg>
-                      <p className="text-sm text-slate-400">{data.csvFile ? data.csvFile.name : 'Click to upload or drag & drop'}</p>
-                      <p className="text-xs text-slate-500 mt-1">CSV, XLSX up to 10MB</p>
+                      <p className="text-sm text-[var(--fg-muted)]">{data.csvFile ? data.csvFile.name : 'Click to upload or drag & drop'}</p>
+                      <p className="mt-1 text-xs text-[var(--fg-muted)]">CSV, XLSX up to 10MB</p>
                     </label>
                   </div>
                 </div>
@@ -285,10 +285,10 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
             <div className="space-y-4">
               <div className="flex items-center justify-between mb-2">
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-300">Products / Properties</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">The AI agent will use these to pitch to leads</p>
+                  <h3 className="text-sm font-semibold text-[var(--fg)]">Products / Properties</h3>
+                  <p className="mt-0.5 text-xs text-[var(--fg-muted)]">The AI agent will use these to pitch to leads</p>
                 </div>
-                <button onClick={addProduct} className="flex items-center gap-1.5 text-xs text-teal-400 hover:text-teal-300 transition">
+                <button onClick={addProduct} className="flex items-center gap-1.5 text-xs text-[var(--accent)] transition hover:text-[var(--accent-hover)]">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                   </svg>
@@ -297,11 +297,11 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
               </div>
 
               {data.products.map((product, idx) => (
-                <div key={product.id} className="border border-slate-700 rounded-xl p-4 space-y-3 bg-slate-800/30">
+                <div key={product.id} className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Product {idx + 1}</span>
+                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">Product {idx + 1}</span>
                     {data.products.length > 1 && (
-                      <button onClick={() => removeProduct(product.id)} className="text-slate-500 hover:text-red-400 transition">
+                      <button onClick={() => removeProduct(product.id)} className="text-[var(--fg-muted)] transition hover:text-red-500">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
@@ -318,30 +318,30 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
                       { field: 'possession_status' as const, label: 'Possession Status', placeholder: 'Ready to Move / Q3 2026' },
                     ].map(({ field, label, placeholder, full }) => (
                       <div key={field} className={full ? 'col-span-2' : ''}>
-                        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">{label}</label>
+                        <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">{label}</label>
                         <input
                           value={product[field]}
                           onChange={e => updateProduct(product.id, field, e.target.value)}
                           placeholder={placeholder}
-                          className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-600 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500/50 transition-all"
+                          className="cf-input !rounded-lg !px-3 !py-2.5 !text-xs"
                         />
                       </div>
                     ))}
                     <div className="col-span-2">
-                      <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Amenities</label>
+                      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">Amenities</label>
                       <textarea
                         value={product.amenities}
                         onChange={e => updateProduct(product.id, 'amenities', e.target.value)}
                         placeholder="Gym, Pool, Parking, Clubhouse, 24/7 Security…"
                         rows={2}
-                        className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-600 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500/50 transition-all resize-none"
+                        className="cf-input resize-none !rounded-lg !px-3 !py-2.5 !text-xs"
                       />
                     </div>
                   </div>
                 </div>
               ))}
 
-              <button onClick={addProduct} className="w-full border-2 border-dashed border-slate-700 rounded-xl p-3 text-sm text-slate-400 hover:border-teal-500/40 hover:text-teal-400 transition-all flex items-center justify-center gap-2">
+              <button onClick={addProduct} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[var(--border)] p-3 text-sm text-[var(--fg-muted)] transition-all hover:border-[var(--accent)]/40 hover:text-[var(--accent)]">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
@@ -353,20 +353,20 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
           {/* Step 4: Team */}
           {step === 4 && (
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-slate-300 mb-2">Assign a Team</h3>
-              <p className="text-xs text-slate-400 mb-4">Choose an existing team or create a new one for this project.</p>
+              <h3 className="mb-2 text-sm font-semibold text-[var(--fg)]">Assign a Team</h3>
+              <p className="mb-4 text-xs text-[var(--fg-muted)]">Choose an existing team or create a new one for this project.</p>
 
               {teams.length > 0 && (
                 <>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Existing Teams</label>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">Existing Teams</label>
                     <div className="space-y-2">
                       {teams.map(team => (
                         <label key={team.id} className={`flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
-                          data.teamId === team.id ? 'border-teal-500/60 bg-teal-500/10 text-white' : 'border-slate-700 bg-slate-800/40 text-slate-400 hover:border-slate-600'
+                          data.teamId === team.id ? 'border-[var(--accent)]/50 bg-[var(--accent-soft)] text-[var(--fg)]' : 'border-[var(--border)] bg-[var(--bg)] text-[var(--fg-muted)] hover:border-[var(--accent)]/30'
                         }`}>
                           <input type="radio" name="team" value={team.id} checked={data.teamId === team.id} onChange={() => setData(d => ({ ...d, teamId: team.id, newTeamName: '' }))} className="sr-only" />
-                          <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${data.teamId === team.id ? 'border-teal-400 bg-teal-400' : 'border-slate-600'}`}>
+                          <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${data.teamId === team.id ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-[var(--border)]'}`}>
                             {data.teamId === team.id && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                           </div>
                           <span className="text-sm font-medium">{team.name}</span>
@@ -374,25 +374,25 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
                       ))}
                     </div>
                   </div>
-                  <div className="border-t border-slate-700 pt-4">
-                    <p className="text-xs text-slate-400 mb-3">Or create a new team:</p>
+                  <div className="border-t border-[var(--border)] pt-4">
+                    <p className="mb-3 text-xs text-[var(--fg-muted)]">Or create a new team:</p>
                   </div>
                 </>
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">New Team Name</label>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">New Team Name</label>
                 <input
                   value={data.newTeamName}
                   onChange={e => setData(d => ({ ...d, newTeamName: e.target.value, teamId: '' }))}
                   placeholder="e.g. Mumbai Sales Team"
-                  className="w-full px-4 py-3 bg-slate-800/70 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500/50 transition-all"
+                  className="cf-input"
                 />
               </div>
 
-              <div className="mt-4 p-4 bg-slate-800/50 rounded-xl border border-slate-700">
-                <p className="text-xs text-slate-400">
-                  <span className="text-teal-400 font-semibold">Tip:</span> You can skip team assignment and add it later from the Team page. Projects without a team are visible to all admins.
+              <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                <p className="text-xs text-[var(--fg-muted)]">
+                  <span className="font-semibold text-[var(--accent)]">Tip:</span> You can skip team assignment and add it later from the Team page. Projects without a team are visible to all admins.
                 </p>
               </div>
             </div>
@@ -400,9 +400,9 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-800 shrink-0 flex gap-3">
+        <div className="flex shrink-0 gap-3 border-t border-[var(--border)] px-6 py-4">
           {step > 1 && (
-            <button onClick={() => setStep(s => s - 1)} className="flex-1 py-3 border border-slate-700 text-slate-400 rounded-xl text-sm hover:border-slate-600 hover:text-slate-300 transition">
+            <button onClick={() => setStep(s => s - 1)} className="cf-btn-secondary flex-1">
               ← Back
             </button>
           )}
@@ -413,7 +413,7 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
                 setError('');
                 setStep(s => s + 1);
               }}
-              className="flex-[2] py-3 bg-gradient-to-r from-teal-500 to-cyan-600 text-white rounded-xl font-semibold text-sm hover:from-teal-400 hover:to-cyan-500 transition-all"
+              className="cf-btn-primary flex-[2]"
             >
               Continue →
             </button>
@@ -421,7 +421,7 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
             <button
               onClick={handleCreate}
               disabled={loading}
-              className="flex-[2] py-3 bg-gradient-to-r from-teal-500 to-cyan-600 text-white rounded-xl font-semibold text-sm hover:from-teal-400 hover:to-cyan-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="cf-btn-primary flex-[2]"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">

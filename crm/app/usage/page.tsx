@@ -64,26 +64,26 @@ function StatCard({ label, value, sub, color = 'default' }: {
   color?: 'default' | 'green' | 'red' | 'blue' | 'amber' | 'purple';
 }) {
   const colors = {
-    default: 'from-slate-800/60 to-slate-800/40 border-slate-700/50',
-    green:   'from-emerald-900/40 to-emerald-900/20 border-emerald-700/40',
-    red:     'from-red-900/40 to-red-900/20 border-red-700/40',
-    blue:    'from-sky-900/40 to-sky-900/20 border-sky-700/40',
-    amber:   'from-amber-900/40 to-amber-900/20 border-amber-700/40',
-    purple:  'from-violet-900/40 to-violet-900/20 border-violet-700/40',
+    default: 'from-[var(--bg-elevated)] to-[var(--bg)] border-[var(--border)]',
+    green:   'from-emerald-50 to-emerald-50/40 border-emerald-200 dark:from-emerald-950/40 dark:to-emerald-950/20 dark:border-emerald-800/40',
+    red:     'from-red-50 to-red-50/40 border-red-200 dark:from-red-950/40 dark:to-red-950/20 dark:border-red-800/40',
+    blue:    'from-[var(--teal-soft)] to-[var(--bg-elevated)] border-[var(--border)]',
+    amber:   'from-[var(--gold-soft)] to-[var(--bg-elevated)] border-[var(--border)]',
+    purple:  'from-[var(--accent-soft)] to-[var(--bg-elevated)] border-[var(--border)]',
   };
   const textColors = {
-    default: 'text-white',
-    green:   'text-emerald-300',
-    red:     'text-red-300',
-    blue:    'text-sky-300',
-    amber:   'text-amber-300',
-    purple:  'text-violet-300',
+    default: 'text-[var(--fg)]',
+    green:   'text-emerald-700 dark:text-emerald-300',
+    red:     'text-red-700 dark:text-red-300',
+    blue:    'text-[var(--teal)]',
+    amber:   'text-[var(--gold)]',
+    purple:  'text-[var(--accent)]',
   };
   return (
     <div className={`bg-gradient-to-br ${colors[color]} border rounded-2xl p-4 flex flex-col gap-1`}>
-      <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">{label}</p>
-      <p className={`text-2xl font-bold ${textColors[color]} leading-tight`}>{value}</p>
-      {sub && <p className="text-[11px] text-slate-500 mt-0.5">{sub}</p>}
+      <p className="text-[11px] font-medium text-[var(--fg-muted)] uppercase tracking-wider">{label}</p>
+      <p className={`text-2xl font-bold ${textColors[color]} leading-tight font-serif`}>{value}</p>
+      {sub && <p className="text-[11px] text-[var(--fg-muted)] mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -91,8 +91,8 @@ function StatCard({ label, value, sub, color = 'default' }: {
 function SectionTitle({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-3 mb-4">
-      <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">{label}</h2>
-      <div className="flex-1 h-px bg-slate-800" />
+      <h2 className="text-sm font-semibold text-[var(--fg)] uppercase tracking-wider">{label}</h2>
+      <div className="flex-1 h-px bg-[var(--border)]" />
     </div>
   );
 }
@@ -101,12 +101,12 @@ function OutcomeBar({ label, count, total, color }: { label: string; count: numb
   const width = total > 0 ? Math.round((count / total) * 100) : 0;
   return (
     <div className="flex items-center gap-3">
-      <span className="text-xs text-slate-400 w-36 truncate">{label}</span>
-      <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+      <span className="text-xs text-[var(--fg-muted)] w-36 truncate">{label}</span>
+      <div className="flex-1 h-2 bg-[var(--bg-warm)] rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${width}%` }} />
       </div>
-      <span className="text-xs font-semibold text-slate-300 w-8 text-right">{count}</span>
-      <span className="text-[11px] text-slate-500 w-10 text-right">{pct(count, total)}</span>
+      <span className="text-xs font-semibold text-[var(--fg)] w-8 text-right">{count}</span>
+      <span className="text-[11px] text-[var(--fg-muted)] w-10 text-right">{pct(count, total)}</span>
     </div>
   );
 }
@@ -174,16 +174,16 @@ export default function UsagePage() {
 
   return (
     <AppShell>
-      <div className="min-h-screen bg-slate-950 px-4 sm:px-6 py-6">
+      <div className="min-h-screen bg-[var(--bg)] px-4 sm:px-6 py-6">
         {/* Header */}
         <div className="mb-6 flex items-start justify-between">
           <div>
-            <h1 className="text-xl font-bold text-white">Usage</h1>
-            <p className="text-sm text-slate-400 mt-0.5">{currentMonthLabel()} · Current month</p>
+            <h1 className="font-serif text-3xl text-[var(--fg)]">Usage</h1>
+            <p className="text-sm text-[var(--fg-muted)] mt-0.5">{currentMonthLabel()} · Current month</p>
           </div>
           <button
             onClick={() => window.location.reload()}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg transition-colors"
+            className="cf-btn-secondary !px-3 !py-1.5 text-xs"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -203,7 +203,7 @@ export default function UsagePage() {
             {[3, 4, 3].map((cols, i) => (
               <div key={i} className={`grid grid-cols-2 sm:grid-cols-${cols} gap-3`}>
                 {Array.from({ length: cols }).map((_, j) => (
-                  <div key={j} className="h-20 rounded-2xl bg-slate-800/60 animate-pulse" />
+                  <div key={j} className="h-20 rounded-2xl bg-[var(--bg-warm)] animate-pulse" />
                 ))}
               </div>
             ))}
@@ -308,7 +308,7 @@ export default function UsagePage() {
             {totalOutcomes > 0 && (
               <div>
                 <SectionTitle label="Outcome Breakdown" />
-                <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-3">
+                <div className="cf-card p-5 space-y-3">
                   {Object.entries(outcomes)
                     .sort(([, a], [, b]) => b - a)
                     .map(([key, count]) => {
@@ -330,38 +330,38 @@ export default function UsagePage() {
             {/* ── Cost Estimates ── */}
             <div>
               <SectionTitle label="Cost Estimates" />
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
-                <p className="text-[11px] text-slate-500 mb-4">
+              <div className="cf-card p-5">
+                <p className="text-[11px] text-[var(--fg-muted)] mb-4">
                   Estimates only — based on {fmtMinutes(minutesUsed)} of connected call time.
                   Actual charges depend on your OpenAI and Telnyx plans.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[11px] text-slate-500 uppercase tracking-wider">OpenAI Realtime</span>
-                    <span className="text-lg font-bold text-white">${estimatedAICost.toFixed(2)}</span>
-                    <span className="text-[11px] text-slate-600">~$0.15/min avg</span>
+                    <span className="text-[11px] text-[var(--fg-muted)] uppercase tracking-wider">OpenAI Realtime</span>
+                    <span className="text-lg font-bold text-[var(--fg)] font-serif">${estimatedAICost.toFixed(2)}</span>
+                    <span className="text-[11px] text-[var(--fg-muted)]">~$0.15/min avg</span>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <span className="text-[11px] text-slate-500 uppercase tracking-wider">Telnyx (India)</span>
-                    <span className="text-lg font-bold text-white">${estimatedTelCost.toFixed(2)}</span>
-                    <span className="text-[11px] text-slate-600">~$0.028/min</span>
+                    <span className="text-[11px] text-[var(--fg-muted)] uppercase tracking-wider">Telnyx (India)</span>
+                    <span className="text-lg font-bold text-[var(--fg)] font-serif">${estimatedTelCost.toFixed(2)}</span>
+                    <span className="text-[11px] text-[var(--fg-muted)]">~$0.028/min</span>
                   </div>
-                  <div className="flex flex-col gap-1 border-t sm:border-t-0 sm:border-l border-slate-800 sm:pl-4 pt-3 sm:pt-0">
-                    <span className="text-[11px] text-slate-500 uppercase tracking-wider">Estimated Total</span>
-                    <span className="text-lg font-bold text-teal-400">${estimatedTotal.toFixed(2)}</span>
-                    <span className="text-[11px] text-slate-600">AI + telecom this month</span>
+                  <div className="flex flex-col gap-1 border-t sm:border-t-0 sm:border-l border-[var(--border)] sm:pl-4 pt-3 sm:pt-0">
+                    <span className="text-[11px] text-[var(--fg-muted)] uppercase tracking-wider">Estimated Total</span>
+                    <span className="text-lg font-bold text-[var(--accent)] font-serif">${estimatedTotal.toFixed(2)}</span>
+                    <span className="text-[11px] text-[var(--fg-muted)]">AI + telecom this month</span>
                   </div>
                 </div>
 
                 {(u.ai_input_tokens_estimated || u.ai_output_tokens_estimated) ? (
-                  <div className="mt-4 pt-4 border-t border-slate-800 flex gap-6 text-sm">
+                  <div className="mt-4 pt-4 border-t border-[var(--border)] flex gap-6 text-sm">
                     <div>
-                      <span className="text-slate-500 text-xs">Input tokens (est.)</span>
-                      <p className="font-semibold text-slate-200">{(u.ai_input_tokens_estimated || 0).toLocaleString()}</p>
+                      <span className="text-[var(--fg-muted)] text-xs">Input tokens (est.)</span>
+                      <p className="font-semibold text-[var(--fg)]">{(u.ai_input_tokens_estimated || 0).toLocaleString()}</p>
                     </div>
                     <div>
-                      <span className="text-slate-500 text-xs">Output tokens (est.)</span>
-                      <p className="font-semibold text-slate-200">{(u.ai_output_tokens_estimated || 0).toLocaleString()}</p>
+                      <span className="text-[var(--fg-muted)] text-xs">Output tokens (est.)</span>
+                      <p className="font-semibold text-[var(--fg)]">{(u.ai_output_tokens_estimated || 0).toLocaleString()}</p>
                     </div>
                   </div>
                 ) : null}
@@ -370,11 +370,11 @@ export default function UsagePage() {
 
             {!u.calls_attempted && !a && (
               <div className="text-center py-16">
-                <svg className="w-10 h-10 text-slate-700 mx-auto mb-3" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <svg className="w-10 h-10 text-[var(--fg-muted)] mx-auto mb-3" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
                 </svg>
-                <p className="text-slate-500 text-sm">No usage data yet this month.</p>
-                <p className="text-slate-600 text-xs mt-1">Start making AI calls to see metrics here.</p>
+                <p className="text-[var(--fg-muted)] text-sm">No usage data yet this month.</p>
+                <p className="text-[var(--fg-muted)] text-xs mt-1">Start making AI calls to see metrics here.</p>
               </div>
             )}
 

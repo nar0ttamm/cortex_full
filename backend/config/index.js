@@ -17,7 +17,7 @@ module.exports = {
   callingMode: e(process.env.CALLING_MODE) || 'simulated', // 'simulated' | 'live'
   callDelaySeconds: parseInt(process.env.CALL_DELAY_SECONDS || '120', 10),
 
-  // Public URL of this backend (used in Exotel callback URLs)
+  // Public URL of this backend (used in webhook/callback URLs)
   backendUrl: e(process.env.BACKEND_URL) || 'http://localhost:4000',
 
   // Default tenant for single-tenant dev mode

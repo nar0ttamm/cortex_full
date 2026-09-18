@@ -82,48 +82,48 @@ function CreateUserModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
-        <h3 className="text-lg font-bold text-white mb-5">Add Team Member</h3>
-        {error && <div className="mb-4 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">{error}</div>}
+      <div className="w-full max-w-md cf-card p-6 shadow-[var(--shadow-lg)]">
+        <h3 className="font-serif text-2xl text-[var(--fg)] mb-5">Add team member</h3>
+        {error && <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 rounded-lg text-red-700 dark:text-red-300 text-sm">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-3">
           {[
-            { label: 'Full Name *', field: 'fullName', type: 'text', placeholder: 'Rahul Sharma' },
-            { label: 'Email *', field: 'email', type: 'email', placeholder: 'rahul@company.com' },
+            { label: 'Full Name *', field: 'fullName', type: 'text', placeholder: 'Your name' },
+            { label: 'Email *', field: 'email', type: 'email', placeholder: 'you@company.com' },
             { label: 'Password *', field: 'password', type: 'password', placeholder: '••••••••' },
             { label: 'Phone', field: 'phone', type: 'tel', placeholder: '+91 98765 43210' },
             { label: 'Position / Role', field: 'position', type: 'text', placeholder: 'Sales Executive' },
           ].map(({ label, field, type, placeholder }) => (
             <div key={field}>
-              <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">{label}</label>
+              <label className="block text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-[0.14em] mb-1">{label}</label>
               <input
                 type={type}
                 value={(form as any)[field]}
                 onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
                 placeholder={placeholder}
-                className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-600 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500/50"
+                className="cf-input !rounded-lg !px-3 !py-2.5"
               />
             </div>
           ))}
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Role *</label>
-            <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-teal-500/50">
+            <label className="block text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-[0.14em] mb-1">Role *</label>
+            <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} className="cf-input !rounded-lg !px-3 !py-2.5">
               <option value="manager">Manager</option>
               <option value="executive">Executive</option>
             </select>
           </div>
           {teams.length > 0 && (
             <div>
-              <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Assign to Team</label>
-              <select value={form.teamId} onChange={e => setForm(f => ({ ...f, teamId: e.target.value }))} className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-teal-500/50">
+              <label className="block text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-[0.14em] mb-1">Assign to Team</label>
+              <select value={form.teamId} onChange={e => setForm(f => ({ ...f, teamId: e.target.value }))} className="cf-input !rounded-lg !px-3 !py-2.5">
                 <option value="">No team yet</option>
                 {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </div>
           )}
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 border border-slate-700 text-slate-400 rounded-xl text-sm hover:border-slate-600 transition">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-[2] py-2.5 bg-gradient-to-r from-teal-500 to-cyan-600 text-white rounded-xl text-sm font-semibold disabled:opacity-50">
-              {loading ? 'Adding…' : 'Add Member'}
+            <button type="button" onClick={onClose} className="cf-btn-secondary flex-1">Cancel</button>
+            <button type="submit" disabled={loading} className="cf-btn-primary flex-[2]">
+              {loading ? 'Adding…' : 'Add member'}
             </button>
           </div>
         </form>

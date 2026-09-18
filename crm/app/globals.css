@@ -2,8 +2,69 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: light;
+  --bg: #f4f0ea;
+  --bg-elevated: #fffdf9;
+  --bg-warm: #ebe4d8;
+  --bg-ink: #1a1714;
+  --fg: #1a1714;
+  --fg-muted: #6b645b;
+  --accent: #e24b1b;
+  --accent-hover: #c43e14;
+  --accent-soft: #fde8df;
+  --teal: #1a6b63;
+  --teal-soft: #e4f3f0;
+  --gold: #c4841d;
+  --gold-soft: #f8ecd3;
+  --border: #e5ddd2;
+  --glow: rgba(226, 75, 27, 0.18);
+  --shadow-sm: 0 1px 2px rgba(26, 23, 20, 0.04);
+  --shadow-md: 0 8px 28px rgba(26, 23, 20, 0.07);
+  --shadow-lg: 0 24px 60px rgba(26, 23, 20, 0.1);
+}
+
 html.dark {
   color-scheme: dark;
+  --bg: #141210;
+  --bg-elevated: #1c1916;
+  --bg-warm: #241f1a;
+  --bg-ink: #0e0c0b;
+  --fg: #f4f0ea;
+  --fg-muted: #a39b92;
+  --accent: #f06a3a;
+  --accent-hover: #e24b1b;
+  --accent-soft: rgba(240, 106, 58, 0.14);
+  --teal: #3d9d93;
+  --teal-soft: rgba(61, 157, 147, 0.14);
+  --gold: #e0a84a;
+  --gold-soft: rgba(224, 168, 74, 0.14);
+  --border: #322c26;
+  --glow: rgba(240, 106, 58, 0.22);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-plus-jakarta), system-ui, sans-serif;
+  letter-spacing: -0.011em;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+.font-serif {
+  font-family: var(--font-instrument), Georgia, serif;
+  letter-spacing: -0.02em;
 }
 
 @keyframes slideIn {
@@ -13,9 +74,14 @@ html.dark {
 .animate-slideIn { animation: slideIn 0.2s ease-out; }
 
 @keyframes fadeIn {
-  from { opacity: 0; } to { opacity: 1; }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
-.animate-fadeIn { animation: fadeIn 0.15s ease-out; }
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 
 @layer utilities {
   .animate-fadeIn {
@@ -25,16 +91,91 @@ html.dark {
     animation: fadeInUp 0.35s ease forwards;
   }
   .animate-pulse-slow {
-    animation: pulse 2.5s cubic-bezier(0.4,0,0.6,1) infinite;
+    animation: pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
+@layer components {
+  .cf-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 1.25rem;
+    box-shadow: var(--shadow-sm);
+  }
 
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  .cf-input {
+    width: 100%;
+    border-radius: 1rem;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    padding: 0.85rem 1.05rem;
+    font-size: 0.9rem;
+    color: var(--fg);
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .cf-input::placeholder {
+    color: var(--fg-muted);
+    opacity: 0.7;
+  }
+
+  .cf-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+
+  .cf-btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    padding: 0.8rem 1.25rem;
+    transition: background 0.2s ease, transform 0.2s ease;
+    box-shadow: 0 10px 24px var(--glow);
+  }
+
+  .cf-btn-primary:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+  }
+
+  .cf-btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .cf-btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    color: var(--fg);
+    font-weight: 600;
+    padding: 0.8rem 1.25rem;
+    border: 1px solid var(--border);
+    transition: border-color 0.2s ease, background 0.2s ease;
+  }
+
+  .cf-btn-secondary:hover {
+    background: var(--bg-warm);
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
 }

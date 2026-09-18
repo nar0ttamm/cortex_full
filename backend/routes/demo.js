@@ -50,10 +50,17 @@ router.post('/demo/request', asyncHandler(async (req, res) => {
   try {
     const tenantId = config.defaultTenantId;
 
-    // Insert a temporary demo lead
+    // Create (or reuse) the demo lead. A repeat demo request from the same
+    // number must not violate the UNIQUE (tenant_id, phone) constraint — reuse
+    // the existing lead instead of failing.
     const leadResult = await db.query(
       `INSERT INTO leads (tenant_id, name, phone, source, status, metadata)
        VALUES ($1, $2, $3, 'demo', 'new', $4)
+       ON CONFLICT (tenant_id, phone) DO UPDATE
+         SET name       = EXCLUDED.name,
+             source     = EXCLUDED.source,
+             metadata   = COALESCE(leads.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+             updated_at = now()
        RETURNING id`,
       [
         tenantId,
@@ -177,10 +184,15 @@ router.post('/demo/whatsapp-interaction', asyncHandler(async (req, res) => {
     return res.status(503).json({ error: 'Voice service not available' });
   }
 
-  // Create new lead and retry call
+  // Reuse the existing demo lead (same tenant_id + phone) for the retry call.
   const leadResult = await db.query(
     `INSERT INTO leads (tenant_id, name, phone, source, status, metadata)
      VALUES ($1, $2, $3, 'demo_retry', 'new', $4)
+     ON CONFLICT (tenant_id, phone) DO UPDATE
+       SET name       = EXCLUDED.name,
+           source     = EXCLUDED.source,
+           metadata   = COALESCE(leads.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+           updated_at = now()
      RETURNING id`,
     [
       tenantId,
@@ -226,46 +238,18 @@ router.post('/demo/whatsapp-interaction', asyncHandler(async (req, res) => {
 async function sendDemoWhatsApp(phone, name, demoRequestId) {
   try {
     const tenantId = config.defaultTenantId;
-    const { getCredentials } = require('../services/credentialService');
-    const creds = await getCredentials(tenantId, 'twilio');
+    const { sendWhatsApp } = require('../services/notificationService');
 
-    if (!creds?.account_sid || !creds?.auth_token || !creds?.whatsapp_number) {
-      return;
-    }
-
-    const authHeader =
-      'Basic ' + Buffer.from(`${creds.account_sid}:${creds.auth_token}`).toString('base64');
-
-    // Use WhatsApp Business template or fallback freeform message
-    const body = [
-      `Hi ${name}! 👋 Thanks for booking a CortexFlow demo.`,
-      ``,
-      `Our AI agent is calling you right now. Please pick up the call to experience a live demo.`,
-      ``,
-      `If you missed the call, reply "RETRY" or click the button below to get called again.`,
-      ``,
-      `— Team CortexFlow`,
-    ].join('\n');
-
-    const form = new URLSearchParams({
-      From: `whatsapp:${creds.whatsapp_number}`,
-      To: `whatsapp:${phone}`,
-      Body: body,
+    // AiSensy template-based send (template: demo_welcome -> {{1}} = name)
+    const result = await sendWhatsApp({
+      tenantId,
+      to: phone,
+      campaignKey: 'demo_welcome',
+      userName: name,
+      templateParams: [name],
     });
 
-    const res = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${creds.account_sid}/Messages.json`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: form.toString(),
-      }
-    );
-
-    if (res.ok) {
+    if (result && !result.skipped) {
       await db.query(
         `UPDATE demo_requests SET whatsapp_sent = true WHERE id = $1`,
         [demoRequestId]

@@ -6,8 +6,8 @@
  *   - metadata.call_initiated = false
  *
  * For each matching lead, triggers a call:
- * - If VOICE_SERVICE_URL is set → cortex_voice (same as CRM "Start AI call")
- * - Else CALLING_MODE simulated → DB-only simulation, live → Exotel
+ * - If VOICE_SERVICE_URL is set → cortex_voice / Telnyx (same as CRM "Start AI call")
+ * - Else → DB-only simulation (dev / pre-provisioning fallback)
  */
 
 const db = require('../db');
@@ -61,12 +61,8 @@ async function processLeadCall(lead) {
     return;
   }
 
-  const mode = (lead.metadata?.calling_mode || config.callingMode).trim();
-  if (mode === 'simulated') {
-    await runSimulatedCall(lead);
-  } else {
-    await runLiveCall(lead);
-  }
+  // No voice service configured → DB-only simulation (dev / pre-provisioning)
+  await runSimulatedCall(lead);
 }
 
 async function runVoiceVmCall(lead) {
@@ -152,34 +148,6 @@ ${transcriptMap[callResult]}
   );
 
   console.log(`[callScheduler] Simulated call complete for lead ${lead.id} → ${callResult}`);
-}
-
-async function runLiveCall(lead) {
-  const { startExotelCall } = require('../services/callService');
-
-  const callResponse = await startExotelCall({
-    tenantId: lead.tenant_id,
-    phone: lead.phone,
-  });
-
-  const callSid = callResponse?.Call?.Sid || callResponse?.sid || 'unknown';
-
-  const updatedMeta = {
-    ...(lead.metadata || {}),
-    call_sid: callSid,
-    call_status: 'initiated',
-    call_initiated: true,
-    calling_mode: 'live',
-    last_call_at: new Date().toISOString(),
-    ai_call_status: 'In Progress',
-  };
-
-  await db.query(
-    'UPDATE leads SET metadata = $1, updated_at = NOW() WHERE id = $2',
-    [JSON.stringify(updatedMeta), lead.id]
-  );
-
-  console.log(`[callScheduler] Live call initiated for lead ${lead.id}, SID: ${callSid}`);
 }
 
 async function markCallInitiated(leadId, extraMeta = {}) {

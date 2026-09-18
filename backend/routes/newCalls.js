@@ -27,6 +27,10 @@ const RETRY_OUTCOMES = new Set([
 
 const router = Router();
 
+// Matches any RFC-4122 UUID. Used to reject malformed ids before they hit a
+// uuid-typed column (which would otherwise throw a Postgres cast error → 500).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Voice service secret guard (only voice-service can POST results)
 function requireVoiceSecret(req, res, next) {
   const secret = req.headers['x-voice-secret'];
@@ -199,6 +203,11 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
   } = req.body;
   if (!tenant_id || !lead_id || !call_id) {
     return res.status(400).json({ error: 'Missing required fields' });
+  }
+  // tenant_id and lead_id map to uuid columns — reject non-UUID values with a
+  // clean 400 instead of letting Postgres throw a cast error (which becomes 500).
+  if (!UUID_RE.test(tenant_id) || !UUID_RE.test(lead_id)) {
+    return res.status(400).json({ error: 'Invalid tenant_id or lead_id (must be UUID)' });
   }
 
   const client = await db.getPool().connect();
