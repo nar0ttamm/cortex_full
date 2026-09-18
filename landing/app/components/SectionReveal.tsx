@@ -23,10 +23,14 @@ export function SectionReveal({
       ([entry]) => {
         if (entry.isIntersecting) setVisible(true);
       },
-      { threshold: 0.08, rootMargin: "0px 0px -60px 0px" }
+      { threshold: 0.04, rootMargin: "0px 0px -40px 0px" }
     );
     observer.observe(el);
-    return () => observer.disconnect();
+    const fallback = window.setTimeout(() => setVisible(true), 1200);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(fallback);
+    };
   }, []);
 
   return (

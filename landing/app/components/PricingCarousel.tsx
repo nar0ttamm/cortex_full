@@ -1,29 +1,29 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-
-const CRM_URL = "https://crm.cortexflow.in";
+import Link from "next/link";
+import { IconCheck } from "./icons";
 
 const PRICING_PLANS = [
   {
     name: "Starter",
-    desc: "For small teams getting started with AI calling and lead management.",
-    features: ["Up to 500 leads", "AI calling basics", "Email & WhatsApp history", "CSV import/export"],
-    price: "Soon to be revealed",
+    desc: "For compact teams turning on AI calling for the first time.",
+    features: ["Up to 500 leads", "AI calling basics", "Email & WhatsApp history", "CSV import / export"],
+    price: "Trial first",
     highlighted: false,
   },
   {
     name: "Growth",
-    desc: "For growing teams that need more scale and automation.",
+    desc: "For sales floors that need volume, workflows, and a live board.",
     features: ["Unlimited leads", "Advanced AI workflows", "Full communication timeline", "Google Sheets sync", "Priority support"],
-    price: "Soon to be revealed",
+    price: "Most teams",
     highlighted: true,
   },
   {
     name: "Enterprise",
-    desc: "For large teams with custom needs and compliance.",
+    desc: "For organisations with custom routing, SSO, and a named partner.",
     features: ["Everything in Growth", "Dedicated account manager", "Custom integrations", "SSO & audit logs", "SLA guarantee"],
-    price: "Soon to be revealed",
+    price: "Let’s talk",
     highlighted: false,
   },
 ];
@@ -34,101 +34,79 @@ export function PricingCarousel() {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof window === "undefined") return;
-    const isMobile = window.innerWidth < 768;
-    if (!isMobile) return;
-    const cardWidth = Math.min(window.innerWidth * 0.72, 320);
-    const gap = 12;
-    el.scrollLeft = cardWidth + gap;
+    if (window.innerWidth >= 768) return;
+    const cardWidth = Math.min(window.innerWidth * 0.78, 340);
+    el.scrollLeft = cardWidth + 16;
   }, []);
 
   return (
     <>
-      {/* Mobile: carousel with center card + peek */}
       <div
         ref={scrollRef}
-        className="mx-auto mt-12 flex snap-x snap-mandatory gap-3 overflow-x-auto px-[7%] pb-4 md:hidden [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
-        style={{ scrollSnapType: "x mandatory" }}
+        className="mx-auto mt-10 flex snap-x snap-mandatory gap-4 overflow-x-auto px-[8%] pb-4 md:hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {PRICING_PLANS.map((plan) => (
-          <div
-            key={plan.name}
-            className="relative w-[72vw] max-w-[320px] shrink-0 snap-center rounded-2xl p-5"
-            style={{ scrollSnapAlign: "center" }}
-          >
-            <div
-              className={`relative h-full rounded-2xl p-5 ${
-                plan.highlighted
-                  ? "cta-gradient-border shadow-[0_0_40px_var(--glow)]"
-                  : "border border-[var(--border)] bg-[var(--bg-elevated)]/60"
-              }`}
-            >
-              {plan.highlighted && (
-                <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 rounded-full bg-[var(--accent)] px-2.5 py-0.5 text-xs font-medium text-[var(--bg)]">
-                  Popular
-                </span>
-              )}
-              <h3 className="text-lg font-semibold text-[var(--fg)]">{plan.name}</h3>
-              <p className="mt-1.5 text-xs text-[var(--fg-muted)]">{plan.desc}</p>
-              <p className="mt-4 text-xl font-bold text-[var(--accent)]">{plan.price}</p>
-              <ul className="mt-4 space-y-2">
-                {plan.features.map((f) => (
-                  <li key={f} className="flex items-center gap-2 text-xs text-[var(--fg-muted)]">
-                    <span className="text-[var(--accent)]">✓</span>
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              <a
-                href={CRM_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-6 block w-full rounded-full border border-[var(--border)] py-2.5 text-center text-sm font-medium text-[var(--fg)] transition hover:border-[var(--accent)] hover:bg-[var(--accent)]/10"
-              >
-                Get started
-              </a>
-            </div>
+          <div key={plan.name} className="w-[78vw] max-w-[340px] shrink-0 snap-center">
+            <PlanCard plan={plan} />
           </div>
         ))}
       </div>
 
-      {/* Desktop: grid */}
-      <div className="mt-16 hidden grid-cols-1 gap-6 md:grid md:grid-cols-3">
+      <div className="mt-12 hidden gap-5 md:grid md:grid-cols-3">
         {PRICING_PLANS.map((plan) => (
-          <div
-            key={plan.name}
-            className={`relative rounded-2xl p-6 md:p-8 ${
-              plan.highlighted
-                ? "cta-gradient-border shadow-[0_0_40px_var(--glow)]"
-                : "border border-[var(--border)] bg-[var(--bg-elevated)]/60"
-            }`}
-          >
-            {plan.highlighted && (
-              <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[var(--accent)] px-3 py-0.5 text-xs font-medium text-[var(--bg)]">
-                Popular
-              </span>
-            )}
-            <h3 className="text-xl font-semibold text-[var(--fg)]">{plan.name}</h3>
-            <p className="mt-2 text-sm text-[var(--fg-muted)]">{plan.desc}</p>
-            <p className="mt-6 text-2xl font-bold text-[var(--accent)]">{plan.price}</p>
-            <ul className="mt-6 space-y-3">
-              {plan.features.map((f) => (
-                <li key={f} className="flex items-center gap-2 text-sm text-[var(--fg-muted)]">
-                  <span className="text-[var(--accent)]">✓</span>
-                  {f}
-                </li>
-              ))}
-            </ul>
-            <a
-              href={CRM_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-8 block w-full rounded-full border border-[var(--border)] py-3 text-center text-sm font-medium text-[var(--fg)] transition hover:border-[var(--accent)] hover:bg-[var(--accent)]/10"
-            >
-              Get started
-            </a>
-          </div>
+          <PlanCard key={plan.name} plan={plan} />
         ))}
       </div>
     </>
+  );
+}
+
+function PlanCard({
+  plan,
+}: {
+  plan: (typeof PRICING_PLANS)[number];
+}) {
+  return (
+    <article
+      className={`relative flex h-full flex-col rounded-[1.7rem] p-6 ${
+        plan.highlighted
+          ? "bg-[var(--bg-ink)] text-white shadow-[var(--shadow-lg)]"
+          : "border border-[var(--border)] bg-[var(--bg-elevated)]"
+      }`}
+    >
+      {plan.highlighted && (
+        <span className="absolute -top-3 left-6 rounded-full bg-[var(--accent)] px-3 py-1 text-[11px] font-bold text-white">
+          Popular
+        </span>
+      )}
+      <h3 className="text-xl font-extrabold">{plan.name}</h3>
+      <p className={`mt-2 text-sm ${plan.highlighted ? "text-white/70" : "text-[var(--fg-muted)]"}`}>
+        {plan.desc}
+      </p>
+      <p className={`mt-6 font-serif text-3xl ${plan.highlighted ? "text-white" : "text-[var(--accent)]"}`}>
+        {plan.price}
+      </p>
+      <p className={`text-xs font-semibold ${plan.highlighted ? "text-white/50" : "text-[var(--fg-muted)]"}`}>
+        Pricing revealed on onboarding
+      </p>
+      <ul className="mt-6 flex-1 space-y-3">
+        {plan.features.map((f) => (
+          <li key={f} className="flex items-start gap-2 text-sm">
+            <IconCheck className={`mt-0.5 h-4 w-4 shrink-0 ${plan.highlighted ? "text-[#f0a07c]" : "text-[var(--teal)]"}`} />
+            <span className={plan.highlighted ? "text-white/85" : "text-[var(--fg-muted)]"}>{f}</span>
+          </li>
+        ))}
+      </ul>
+      <Link
+        href="/get-started"
+        className={`mt-8 block rounded-full py-3 text-center text-sm font-bold transition ${
+          plan.highlighted
+            ? "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]"
+            : "border border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+        }`}
+      >
+        Get started
+      </Link>
+    </article>
   );
 }

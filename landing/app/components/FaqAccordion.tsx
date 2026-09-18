@@ -4,68 +4,65 @@ import { useState } from "react";
 
 const faqs = [
   {
-    id: "1",
-    q: "What is CortexFlow?",
-    a: "CortexFlow is an AI-powered CRM that combines lead management with AI calling automation. Manage leads, track WhatsApp, email, and call history, and run your sales pipeline from one dashboard.",
+    id: "01",
+    q: "What is CortexFlow AI?",
+    a: "CortexFlow AI is an AI-powered CRM that pairs lead management with always-on calling. It dials new leads, qualifies conversations, books appointments, and keeps WhatsApp, email, and call history on one timeline.",
   },
   {
-    id: "2",
-    q: "How does CortexFlow work?",
-    a: "Connect your data (Google Sheets or CSV), set up AI calling workflows, and track every touchpoint in the CRM. All communications appear in a single timeline so you never lose context.",
+    id: "02",
+    q: "How fast does the AI call a new lead?",
+    a: "As soon as a lead lands — typically under two minutes. Speed-to-lead is the whole product thesis: the first team to speak usually wins the meeting.",
   },
   {
-    id: "3",
-    q: "Can I import my existing leads?",
-    a: "Yes. Bulk import via CSV or connect a Google Sheet. Your pipeline moves in without re-typing.",
+    id: "03",
+    q: "Can I import my existing pipeline?",
+    a: "Yes. Bulk import via CSV or connect a Google Sheet. Names, numbers, and project tags map in without re-typing.",
   },
   {
-    id: "4",
-    q: "Is my data secure?",
-    a: "We use OAuth for access and keep your data under your control. Communications and lead data are stored securely.",
+    id: "04",
+    q: "Is my data isolated from other customers?",
+    a: "Yes. We use tenant isolation, OAuth for access, and encrypted credentials. Your pipeline is not a shared spreadsheet.",
   },
   {
-    id: "5",
-    q: "What channels are supported?",
-    a: "CortexFlow tracks WhatsApp, email, and voice calls in one place. View full communication history per lead.",
+    id: "05",
+    q: "Which channels sit in the CRM?",
+    a: "Voice, WhatsApp, and email — plus calendar holds created during the call. Every touchpoint is visible before a human picks up.",
   },
 ];
 
 export function FaqAccordion() {
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>("01");
 
   return (
-    <div className="mx-auto max-w-3xl space-y-3">
+    <div className="space-y-3">
       {faqs.map((faq) => {
         const isOpen = openId === faq.id;
         return (
           <div
             key={faq.id}
-            className="rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)]/80 overflow-hidden transition-colors hover:border-[var(--accent)]/40 md:rounded-2xl"
+            className={`overflow-hidden rounded-2xl border transition ${
+              isOpen ? "border-[var(--accent)]/30 bg-white shadow-[var(--shadow-sm)]" : "border-[var(--border)] bg-[var(--bg-elevated)]"
+            }`}
           >
             <button
               type="button"
               onClick={() => setOpenId(isOpen ? null : faq.id)}
-              className="flex w-full items-center justify-between gap-2 px-4 py-4 text-left md:gap-4 md:px-6 md:py-5"
+              className="flex w-full items-center gap-4 px-5 py-4 text-left"
+              aria-expanded={isOpen}
             >
-              <span className="text-xs font-medium text-[var(--fg-muted)] shrink-0 mr-1 md:mr-2 md:text-sm">
-                {faq.id.padStart(2, "0")}
-              </span>
-              <span className="min-w-0 flex-1 text-left text-sm font-semibold text-[var(--fg)] md:text-base">
-                {faq.q}
-              </span>
+              <span className="font-serif text-lg text-[var(--accent)]">{faq.id}</span>
+              <span className="flex-1 text-base font-bold">{faq.q}</span>
               <span
-                className={`text-2xl text-[var(--accent)] transition-transform duration-300 ${isOpen ? "rotate-45" : ""}`}
+                className={`flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] text-lg leading-none transition ${
+                  isOpen ? "rotate-45 bg-[var(--accent)] text-white" : "bg-white"
+                }`}
               >
                 +
               </span>
             </button>
-            <div
-              className={`grid transition-all duration-300 ease-out ${isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
-            >
+            <div className={`grid transition-all duration-300 ${isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
               <div className="overflow-hidden">
-                <p className="px-4 pb-4 pt-0 text-[var(--fg-muted)] text-xs leading-relaxed md:px-6 md:pb-5 md:text-sm">
-                  {faq.a}
-                </p>
+                <p className="px-5 pb-5 pl-[4.25rem] text-sm leading-relaxed text-[var(--fg-muted)]">{faq.a}</p>
               </div>
             </div>
           </div>

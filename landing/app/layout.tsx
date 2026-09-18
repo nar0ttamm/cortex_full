@@ -1,26 +1,30 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Instrument_Serif, Plus_Jakarta_Sans } from "next/font/google";
 import { PageLoader } from "./components/PageLoader";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const jakarta = Plus_Jakarta_Sans({
+  variable: "--font-plus-jakarta",
   subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const instrument = Instrument_Serif({
+  variable: "--font-instrument",
   subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "CortexFlow — AI Calling & Lead Management CRM",
+  title: "CortexFlow AI — calling CRM that never clocks out",
   description:
-    "Automate lead management with AI calling, WhatsApp, email, and call tracking. One dashboard for your entire sales pipeline.",
+    "CortexFlow AI calls every lead in under two minutes, qualifies conversations, books appointments, and keeps WhatsApp, email, and call history in one CRM.",
   openGraph: {
-    title: "CortexFlow — AI Calling & Lead Management CRM",
+    title: "CortexFlow AI — calling CRM that never clocks out",
     description:
-      "Automate lead management with AI calling, WhatsApp, email, and call tracking.",
+      "AI calls your leads, qualifies them, and books the meeting — while your team stays focused on closing.",
   },
 };
 
@@ -29,7 +33,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${jakarta.variable} ${instrument.variable} antialiased`}>
         <PageLoader />
         {children}
       </body>
