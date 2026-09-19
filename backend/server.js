@@ -1,4 +1,4 @@
-// Load environment variables (local dev only — Vercel injects them automatically)
+// Load environment variables (local dev only — Vercel injects them automatically).
 if (process.env.NODE_ENV !== 'production') {
   require('dotenv').config();
   const path = require('path');
