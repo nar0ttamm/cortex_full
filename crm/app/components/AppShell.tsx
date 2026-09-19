@@ -50,8 +50,10 @@ export function AppShell({ children, title, actions }: Props) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--bg-elevated)]/90 px-4 py-3 shadow-[var(--shadow-sm)] backdrop-blur-xl lg:px-5">
-          <div className="flex min-w-0 items-center gap-3">
+        <header className="flex h-16 shrink-0 items-stretch border-b border-[var(--border)] bg-[var(--bg-elevated)]/90 shadow-[var(--shadow-sm)] backdrop-blur-xl">
+          <BrandMark flush />
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 lg:px-5">
+            <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setMobileOpen(true)}
               className="shrink-0 rounded-xl p-2 text-[var(--fg-muted)] transition-colors hover:bg-[var(--bg-warm)] lg:hidden"
@@ -62,18 +64,13 @@ export function AppShell({ children, title, actions }: Props) {
               </svg>
             </button>
 
-            <div className="hidden sm:block">
-              <BrandMark />
-            </div>
-
             {title && (
               <>
-                <span className="hidden text-[var(--border)] sm:block">|</span>
                 <h1 className="hidden truncate font-serif text-lg text-[var(--fg)] sm:block">{title}</h1>
                 <h1 className="truncate text-sm font-semibold text-[var(--fg)] sm:hidden">{title}</h1>
               </>
             )}
-          </div>
+            </div>
 
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -89,6 +86,7 @@ export function AppShell({ children, title, actions }: Props) {
             </button>
             <ThemeToggle />
             {actions}
+          </div>
           </div>
         </header>
 

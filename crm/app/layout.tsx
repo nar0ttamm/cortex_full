@@ -22,6 +22,10 @@ export const metadata: Metadata = {
   title: "CortexFlow AI — CRM",
   description:
     "Intelligent CRM for automated lead management, AI calling, and appointment scheduling",
+  icons: {
+    icon: [{ url: "/favicon.png", type: "image/png" }],
+    apple: "/favicon.png",
+  },
 };
 
 const themeBootScript = `try{if(localStorage.getItem('dark-mode')==='true'){document.documentElement.classList.add('dark')}}catch(e){}`;

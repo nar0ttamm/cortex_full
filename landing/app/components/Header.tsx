@@ -26,15 +26,15 @@ export function Header() {
   return (
     <header className="fixed inset-x-0 top-0 z-50 px-3 pt-3 md:px-6 md:pt-5">
       <nav
-        className={`mx-auto flex max-w-6xl items-center justify-between rounded-2xl px-4 py-3 transition-all duration-300 md:px-5 ${
+        className={`mx-auto flex h-16 max-w-6xl items-stretch overflow-hidden rounded-2xl pr-3 transition-all duration-300 md:h-[4.25rem] md:pr-5 ${
           scrolled || open
             ? "border border-[var(--border)] bg-[var(--bg-elevated)]/90 shadow-[var(--shadow-md)] backdrop-blur-xl"
             : "border border-transparent bg-[var(--bg-elevated)]/55 backdrop-blur-md"
         }`}
       >
-        <Logo />
+        <Logo flush />
 
-        <div className="hidden items-center gap-7 lg:flex">
+        <div className="hidden flex-1 items-center justify-center gap-7 lg:flex">
           {NAV_LINKS.map((link) => (
             <a
               key={link.label}
@@ -46,7 +46,7 @@ export function Header() {
           ))}
         </div>
 
-        <div className="hidden items-center gap-2 lg:flex">
+        <div className="ml-auto hidden items-center gap-2 lg:flex">
           <Link
             href="/signin"
             className="rounded-full px-4 py-2 text-sm font-semibold text-[var(--fg)] transition hover:bg-[var(--bg-warm)]"
@@ -60,7 +60,7 @@ export function Header() {
 
         <button
           type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border)] bg-white lg:hidden"
+          className="ml-auto flex h-10 w-10 shrink-0 self-center items-center justify-center rounded-xl border border-[var(--border)] bg-white lg:hidden"
           onClick={() => setOpen((v) => !v)}
           aria-label={open ? "Close menu" : "Open menu"}
         >

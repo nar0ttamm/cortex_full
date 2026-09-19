@@ -1,28 +1,33 @@
 import Link from 'next/link';
 
-export function BrandMark({ compact = false, href = '/' }: { compact?: boolean; href?: string }) {
+export function BrandMark({
+  compact = false,
+  flush = false,
+  href = '/',
+}: {
+  compact?: boolean;
+  flush?: boolean;
+  href?: string;
+}) {
+  if (flush) {
+    return (
+      <Link href={href} className="flex h-full shrink-0 self-stretch" aria-label="CortexFlow AI">
+        <img src="/logo.png" alt="CortexFlow" className="h-full w-auto object-cover object-left" />
+      </Link>
+    );
+  }
+
   return (
-    <Link href={href} className="inline-flex items-center gap-2.5 min-w-0">
-      <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent)] text-white shadow-[0_8px_18px_var(--glow)]">
-        <svg viewBox="0 0 24 24" className="h-4.5 w-4.5 h-[18px] w-[18px]" fill="none" aria-hidden>
-          <path
-            d="M5 14c2.8-1.4 4.4-4.8 4.4-8.2M12 19c3.2-2 6.6-3 10-2.4"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-          <path
-            d="M5.5 8.5c3.6 0 6.2 2.4 8.8 7.2"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-          <circle cx="6.2" cy="14.4" r="1.5" fill="currentColor" />
-        </svg>
-      </span>
-      {!compact && (
-        <span className="truncate text-[0.95rem] font-extrabold tracking-tight text-[var(--fg)]">
-          CortexFlow <span className="tracking-[0.06em]">AI</span>
+    <Link href={href} className="inline-flex min-w-0 items-center" aria-label="CortexFlow AI">
+      {compact ? (
+        <img
+          src="/favicon.png"
+          alt=""
+          className="h-8 w-8 shrink-0 rounded-lg bg-[#050505] object-contain ring-1 ring-[var(--border)]"
+        />
+      ) : (
+        <span className="inline-flex rounded-lg bg-[#050505] ring-1 ring-black/10 dark:bg-white dark:p-0.5 dark:ring-[var(--border)]">
+          <img src="/logo.png" alt="CortexFlow" className="h-7 w-auto max-w-[168px] rounded-md object-contain object-left sm:h-8" />
         </span>
       )}
     </Link>

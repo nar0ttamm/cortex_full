@@ -21,10 +21,15 @@ export const metadata: Metadata = {
   title: "CortexFlow AI — calling CRM that never clocks out",
   description:
     "CortexFlow AI calls every lead in under two minutes, qualifies conversations, books appointments, and keeps WhatsApp, email, and call history in one CRM.",
+  icons: {
+    icon: [{ url: "/favicon.png", type: "image/png" }],
+    apple: "/favicon.png",
+  },
   openGraph: {
     title: "CortexFlow AI — calling CRM that never clocks out",
     description:
       "AI calls your leads, qualifies them, and books the meeting — while your team stays focused on closing.",
+    images: [{ url: "/logo.png", alt: "CortexFlow" }],
   },
 };
 

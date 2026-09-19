@@ -33,7 +33,7 @@ export function PageLoader() {
       aria-hidden
     >
       <div className="flex flex-col items-center gap-4">
-        <span className="font-serif text-3xl">CortexFlow AI</span>
+        <img src="/logo.png" alt="CortexFlow" className="h-10 w-auto object-contain" />
         <span
           className="h-1 w-24 origin-center rounded-full bg-[var(--accent)]"
           style={{ animation: "loader-bar 1s ease-in-out infinite" }}
