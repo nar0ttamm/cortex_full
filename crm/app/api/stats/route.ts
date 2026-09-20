@@ -5,7 +5,7 @@ import { requireAuth } from '@/lib/auth';
 import { getLeadsFromSupabase } from '@/lib/supabase-client';
 import { buildDashboardAnalytics } from '@/lib/analyticsFromLeads';
 import { DashboardStats, type DashboardAnalyticsPayload } from '@/types';
-import { getBackendAuthHeaders } from '@/lib/backendAuth';
+import { getBackendAuthHeaders } from '@/lib/backendAuth.server';
 
 async function fetchCallsActiveCount(tenantId: string): Promise<number> {
   const base = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '';

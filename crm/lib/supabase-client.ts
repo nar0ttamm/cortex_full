@@ -1,7 +1,7 @@
 // Backend API client for leads (CRM talks to Backend API, not Supabase directly).
 // File name kept as supabase-client for minimal change to existing imports.
 
-import { getBackendAuthHeaders } from './backendAuth';
+import { getBackendAuthHeaders } from './backendAuth.server';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 if (!API_URL && typeof window === 'undefined') {

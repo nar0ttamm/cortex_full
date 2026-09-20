@@ -1,9 +1,8 @@
 /**
- * Browser-only: attach the current Supabase access token to backend API calls.
- * Do not import supabase/server here — Next.js client bundles cannot load next/headers.
+ * Server-only: attach the cookie session JWT to backend API calls.
  */
 
-import { createClient } from './supabase/client';
+import { createClient } from './supabase/server';
 
 export async function getBackendAuthHeaders(
   extra?: Record<string, string>
@@ -14,7 +13,7 @@ export async function getBackendAuthHeaders(
   };
 
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -22,7 +21,7 @@ export async function getBackendAuthHeaders(
       headers.Authorization = `Bearer ${session.access_token}`;
     }
   } catch (err) {
-    console.warn('[backendAuth] could not read session', err);
+    console.warn('[backendAuth.server] could not read session', err);
   }
 
   return headers;

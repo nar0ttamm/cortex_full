@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { getBackendAuthHeaders } from '@/lib/backendAuth';
+import { getBackendAuthHeaders } from '@/lib/backendAuth.server';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
 
