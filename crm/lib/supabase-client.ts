@@ -58,6 +58,9 @@ function flattenLead(lead: any): any {
     scheduled_call_at: m.scheduled_call_at ?? null,
     call_initiated: callInitiated,
     active_call: m.active_call ?? null,
+    needs_project_assignment: m.needs_project_assignment === true,
+    project_assignment_reason: m.project_assignment_reason ?? null,
+    last_summary: lead.last_summary ?? m.last_summary ?? null,
     timestamp: lead.created_at ?? lead.timestamp,
     last_update: lead.updated_at ?? lead.last_update,
   };
@@ -75,7 +78,7 @@ export async function getLeadFromSupabase(id: string, tenantId: string): Promise
 }
 
 export async function createLeadInSupabase(
-  lead: { name: string; phone: string; email?: string; inquiry?: string; source?: string },
+  lead: { name: string; phone: string; email?: string; inquiry?: string; source?: string; project_id?: string },
   tenantId?: string
 ): Promise<void> {
   const tid = tenantId || (lead as any).tenant_id;
@@ -89,6 +92,7 @@ export async function createLeadInSupabase(
       email: lead.email ?? undefined,
       inquiry: lead.inquiry ?? undefined,
       source: lead.source ?? 'CRM',
+      project_id: lead.project_id ?? undefined,
     }),
   });
 }
@@ -102,6 +106,8 @@ export async function updateLeadInSupabase(
     body: JSON.stringify({
       status: updates.status,
       metadata: updates.metadata,
+      project_id: updates.project_id,
+      assigned_to: updates.assigned_to,
     }),
   });
 }

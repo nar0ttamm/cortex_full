@@ -10,6 +10,7 @@ const { buildCallContext } = require('./callContextBuilder');
 const { selectProducts } = require('./productSelector');
 const { extractAndStoreIntent } = require('./leadIntentExtractor');
 const { trackUsage } = require('./usageTracker');
+const { resolveProject } = require('./projectResolver');
 
 class StartCallError extends Error {
   constructor(status, message, extra = {}) {
@@ -38,6 +39,30 @@ async function startOutboundCall({ tenantId, leadId, isDemo = false }) {
     throw new StartCallError(404, 'Lead not found');
   }
   const lead = leadResult.rows[0];
+
+  if (!lead.project_id) {
+    const resolved = await resolveProject({ tenantId, projectId: null });
+    if (resolved.projectId) {
+      await db.query(
+        `UPDATE leads SET project_id = $1, metadata = COALESCE(metadata, '{}') || $2::jsonb, updated_at = NOW()
+         WHERE id = $3 AND tenant_id = $4`,
+        [resolved.projectId, JSON.stringify({ needs_project_assignment: false, project_assignment_reason: resolved.reason }), leadId, tenantId]
+      );
+      lead.project_id = resolved.projectId;
+    } else {
+      await db.query(
+        `UPDATE leads SET metadata = COALESCE(metadata, '{}') || $1::jsonb, updated_at = NOW()
+         WHERE id = $2 AND tenant_id = $3`,
+        [JSON.stringify({
+          needs_project_assignment: true,
+          project_assignment_reason: resolved.activeCount > 1
+            ? 'Multiple projects exist — assign one before calling.'
+            : 'Assign a project so the AI knows what to sell.',
+        }), leadId, tenantId]
+      );
+      throw new StartCallError(409, 'Assign a project before starting an AI call. The agent needs project knowledge.');
+    }
+  }
 
   const guard = await db.query(
     `UPDATE leads

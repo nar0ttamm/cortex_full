@@ -35,6 +35,27 @@ export interface Lead {
   /** True after dial started or completed */
   call_initiated?: boolean;
   active_call?: ActiveCallMeta | null;
+  project_id?: string | null;
+  project_name?: string | null;
+  assigned_to?: string | null;
+  assigned_name?: string | null;
+  score?: number | null;
+  temperature?: string | null;
+  next_action?: string | null;
+  next_action_at?: string | null;
+  human_handoff?: boolean;
+  last_summary?: string | null;
+  interest_level?: string | null;
+  budget?: string | null;
+  preferred_location?: string | null;
+  property_type?: string | null;
+  timeline?: string | null;
+  callback_time?: string | null;
+  score_signals?: string[] | null;
+  objections?: string[] | string | null;
+  first_call_at?: string | null;
+  needs_project_assignment?: boolean;
+  project_assignment_reason?: string | null;
   metadata?: {
     calling_mode?: string;
     [key: string]: any;
@@ -77,6 +98,39 @@ export interface DashboardAnalyticsPayload {
     converted: number;
     conversionRate: number;
   };
+  conversion?: {
+    funnel: {
+      leads: number;
+      called: number;
+      connected: number;
+      qualified: number;
+      appointments: number;
+      confirmed: number;
+    };
+    rates: Record<string, number | null>;
+    timeToFirstCall: {
+      sampleSize: number;
+      averageSec: number | null;
+      medianSec: number | null;
+      fastestSec: number | null;
+      slowestSec: number | null;
+    };
+    sourceFunnel: { source: string; leads: number; called: number; qualified: number; appointments: number }[];
+    estimatedPipeline: number | null;
+    needsAttention: {
+      id: string;
+      name: string;
+      score: number | null;
+      temperature: string | null;
+      next_action: string | null;
+      last_summary: string | null;
+      requirement: string | null;
+      location: string | null;
+      human_handoff: boolean;
+      needs_project: boolean;
+      appointment_date: string | null;
+    }[];
+  } | null;
 }
 
 export interface RecentActivity {

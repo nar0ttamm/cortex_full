@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
       email: row.email || '',
       inquiry: row.inquiry || row.message || row.query || '',
       source: row.source || 'CSV Import',
+      project_id: row.project_id || row.projectid || undefined,
     }));
 
     const validLeads = leads.filter(lead => lead.name && lead.phone);

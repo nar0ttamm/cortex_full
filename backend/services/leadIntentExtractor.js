@@ -260,4 +260,74 @@ async function updateLeadMemory({
   }
 }
 
-module.exports = { extractIntent, extractAndStoreIntent, updateLeadMemory };
+/**
+ * Persist post-call conversion fields. Safe if a column is still missing.
+ */
+async function persistConversion({
+  leadId,
+  tenantId,
+  projectId,
+  last_summary,
+  last_outcome,
+  score,
+  temperature,
+  next_action,
+  next_action_at,
+  human_handoff,
+  ai_confidence,
+  score_signals,
+  preferred_product,
+  decision_maker,
+  callback_time,
+  interest_level,
+}) {
+  try {
+    await db.query(
+      `INSERT INTO lead_context (
+         lead_id, tenant_id, project_id, last_summary, last_outcome, interest_level, callback_time,
+         score, temperature, next_action, next_action_at, human_handoff, ai_confidence,
+         score_signals, preferred_product, decision_maker, last_contacted_at, call_count
+       ) VALUES (
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, NOW(), 1
+       )
+       ON CONFLICT (lead_id) DO UPDATE SET
+         last_summary = COALESCE(EXCLUDED.last_summary, lead_context.last_summary),
+         last_outcome = COALESCE(EXCLUDED.last_outcome, lead_context.last_outcome),
+         interest_level = COALESCE(EXCLUDED.interest_level, lead_context.interest_level),
+         callback_time = COALESCE(EXCLUDED.callback_time, lead_context.callback_time),
+         score = EXCLUDED.score,
+         temperature = EXCLUDED.temperature,
+         next_action = EXCLUDED.next_action,
+         next_action_at = EXCLUDED.next_action_at,
+         human_handoff = COALESCE(EXCLUDED.human_handoff, lead_context.human_handoff),
+         ai_confidence = COALESCE(EXCLUDED.ai_confidence, lead_context.ai_confidence),
+         score_signals = COALESCE(EXCLUDED.score_signals, lead_context.score_signals),
+         preferred_product = COALESCE(EXCLUDED.preferred_product, lead_context.preferred_product),
+         decision_maker = COALESCE(EXCLUDED.decision_maker, lead_context.decision_maker),
+         last_contacted_at = NOW(),
+         updated_at = NOW()`,
+      [
+        leadId,
+        tenantId,
+        projectId || null,
+        last_summary || null,
+        last_outcome || null,
+        interest_level || null,
+        callback_time || null,
+        score != null ? score : null,
+        temperature || null,
+        next_action || null,
+        next_action_at || null,
+        human_handoff === true,
+        ai_confidence || null,
+        JSON.stringify(score_signals || []),
+        preferred_product || null,
+        decision_maker || null,
+      ]
+    );
+  } catch (err) {
+    console.warn('[leadIntentExtractor] persistConversion failed:', err.message);
+  }
+}
+
+module.exports = { extractIntent, extractAndStoreIntent, updateLeadMemory, persistConversion };

@@ -18,6 +18,8 @@ interface TenantProfile {
   website: string;
   timezone: string;
   call_delay_seconds: string;
+  average_deal_value: string;
+  default_project_id: string;
 }
 
 const TIMEZONES = [
@@ -41,6 +43,7 @@ const FIELDS: { key: keyof TenantProfile; label: string; type?: string; placehol
   { key: 'business_type',     label: 'Industry / Business Type', placeholder: 'Select industry',             hint: 'Helps personalize AI responses', options: BUSINESS_TYPES },
   { key: 'timezone',          label: 'Timezone',              placeholder: 'Select timezone',                 hint: 'Used for scheduling calls and reminders', options: TIMEZONES },
   { key: 'call_delay_seconds', label: 'Call Delay (seconds)', placeholder: '60',                             hint: 'Delay before AI calls a new lead (min 60)', type: 'number' },
+  { key: 'average_deal_value', label: 'Average deal value (₹)', placeholder: 'Optional',                     hint: 'Used only for Estimated pipeline. Never shown as revenue.', type: 'number' },
 ];
 
 export default function TenantPage() {
@@ -49,7 +52,10 @@ export default function TenantPage() {
     name: '', owner_name: '', contact_email: '', whatsapp_number: '',
     phone_number: '', business_type: '', website: '', timezone: 'Asia/Kolkata',
     call_delay_seconds: '60',
+    average_deal_value: '',
+    default_project_id: '',
   });
+  const [projects, setProjects] = useState<{ id: string; name: string; status?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -81,7 +87,20 @@ export default function TenantPage() {
         website:             s.website || '',
         timezone:            s.timezone || 'Asia/Kolkata',
         call_delay_seconds:  String(s.call_delay_seconds ?? 60),
+        average_deal_value: s.average_deal_value != null ? String(s.average_deal_value) : '',
+        default_project_id: s.default_project_id || '',
       });
+      try {
+        const pRes = await fetch(`${API_URL}/v1/projects?tenantId=${encodeURIComponent(tenantId)}`, {
+          headers: await getBackendAuthHeaders(),
+        });
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          setProjects(pData.projects || []);
+        }
+      } catch {
+        setProjects([]);
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -103,6 +122,8 @@ export default function TenantPage() {
           settings: {
             ...rest,
             call_delay_seconds: parseInt(rest.call_delay_seconds) || 60,
+            average_deal_value: rest.average_deal_value ? Number(rest.average_deal_value) : null,
+            default_project_id: rest.default_project_id || null,
           },
         }),
       });
@@ -258,6 +279,25 @@ export default function TenantPage() {
                 )}
               </div>
             ))}
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                Default project
+              </label>
+              <select
+                value={form.default_project_id}
+                onChange={(e) => setForm({ ...form, default_project_id: e.target.value })}
+                disabled={!editing}
+                className={inputCls(!editing)}
+              >
+                <option value="">None — assign only if one project exists</option>
+                {projects.filter((p) => p.status !== 'archived').map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                Used when a lead arrives without a project and more than one project exists.
+              </p>
+            </div>
           </div>
 
           {editing && (

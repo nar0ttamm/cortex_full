@@ -9,6 +9,7 @@ import { fetchCallsForTenant, startAiCall, type CallRow } from '@/lib/callsApi';
 import { useTenantId } from '@/app/hooks/useTenantId';
 import { isCallStatusLive, labelForCallDbStatus } from '@/lib/callStatusUi';
 import { formatCallOutcome } from '@/lib/leadOutcomeLabels';
+import { LeadConversionPanel } from '../../components/LeadConversionPanel';
 
 interface Note {
   id: string;
@@ -296,6 +297,13 @@ export default function LeadDetailPage() {
 
           {/* Left column */}
           <div className="lg:col-span-2 space-y-4">
+            <LeadConversionPanel
+              lead={lead}
+              onUpdated={fetchLead}
+              onCallNow={handleStartAiCall}
+              calling={startingCall}
+            />
+
             {/* Basic info */}
             <div className={card}>
               <SectionTitle label="Contact Information" />
@@ -506,6 +514,19 @@ export default function LeadDetailPage() {
                     </div>
                   </li>
                 )}
+                {(lead.callback_time || lead.next_action === 'callback' || lead.status === 'callback_scheduled') && (
+                  <li className="flex items-start gap-3">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 mt-1 shrink-0 shadow-sm shadow-amber-200" />
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Callback requested</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {(lead.next_action_at || lead.callback_time)
+                          ? new Date(lead.next_action_at || lead.callback_time || '').toLocaleString()
+                          : 'Time not extracted'}
+                      </p>
+                    </div>
+                  </li>
+                )}
                 {lead.appointment_status === 'Scheduled' && (
                   <li className="flex items-start gap-3">
                     <span className="w-2.5 h-2.5 rounded-full bg-violet-500 mt-1 shrink-0 shadow-sm shadow-violet-200" />
@@ -514,6 +535,15 @@ export default function LeadDetailPage() {
                       <p className="text-xs text-slate-400 mt-0.5">
                         {lead.appointment_date ? new Date(lead.appointment_date).toLocaleString() : ''}
                       </p>
+                    </div>
+                  </li>
+                )}
+                {lead.human_handoff && (
+                  <li className="flex items-start gap-3">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 mt-1 shrink-0" />
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Human follow-up recommended</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{lead.temperature || 'Qualified lead'}</p>
                     </div>
                   </li>
                 )}
@@ -543,10 +573,13 @@ export default function LeadDetailPage() {
                 </div>
               )}
               <div className="space-y-2">
+                <p className="text-xs text-slate-500">
+                  {lead.project_name ? `Project: ${lead.project_name}` : 'No project selected'}
+                </p>
                 <button
                   type="button"
                   onClick={handleStartAiCall}
-                  disabled={startingCall}
+                  disabled={startingCall || Boolean(lead.needs_project_assignment)}
                   className="w-full flex items-center justify-between px-4 py-3 bg-slate-900 dark:bg-slate-700 border border-slate-700 dark:border-slate-600 rounded-xl text-sm font-semibold text-white hover:bg-slate-800 dark:hover:bg-slate-600 transition-colors disabled:opacity-50"
                 >
                   {startingCall ? 'Connecting…' : 'Start AI Call'}

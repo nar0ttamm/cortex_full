@@ -3,6 +3,10 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { AppShell } from '../components/AppShell';
+import { useTenantId } from '@/app/hooks/useTenantId';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
+
+const API = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
 
 export default function DataManagementPage() {
   const [importing, setImporting] = useState(false);
@@ -16,18 +20,37 @@ export default function DataManagementPage() {
       .then((d) => setLeadCount(Array.isArray(d?.leads) ? d.leads.length : null))
       .catch(() => setLeadCount(null));
   }, []);
+  const { tenantId } = useTenantId();
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
     email: '',
     inquiry: '',
     source: 'Manual Entry',
+    project_id: '',
   });
 
+  useEffect(() => {
+    if (!API || !tenantId) return;
+    void (async () => {
+      try {
+        const headers = await getBackendAuthHeaders();
+        const res = await fetch(`${API}/v1/projects?tenantId=${encodeURIComponent(tenantId)}`, { headers });
+        if (res.ok) {
+          const d = await res.json();
+          setProjects(d.projects || []);
+        }
+      } catch {
+        setProjects([]);
+      }
+    })();
+  }, [tenantId]);
+
   const downloadCsvTemplate = () => {
-    const header = 'name,phone,email,inquiry,source';
+    const header = 'name,phone,email,inquiry,source,project_id';
     const example =
-      '"Jane Doe","+919876543210","jane@example.com","2BHK in Indiranagar","CSV Import"';
+      '"Jane Doe","+919876543210","jane@example.com","2BHK in Indiranagar","CSV Import",""';
     const csv = `${header}\n${example}\n`;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = window.URL.createObjectURL(blob);
@@ -139,6 +162,7 @@ export default function DataManagementPage() {
         email: '',
         inquiry: '',
         source: 'Manual Entry',
+        project_id: '',
       });
       setShowManualForm(false);
     } catch (error) {
@@ -250,6 +274,19 @@ export default function DataManagementPage() {
               <div>
                 <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Source</label>
                 <input type="text" value={formData.source} onChange={(e) => setFormData({ ...formData, source: e.target.value })} className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Project</label>
+                <select
+                  value={formData.project_id}
+                  onChange={(e) => setFormData({ ...formData, project_id: e.target.value })}
+                  className={inputCls}
+                >
+                  <option value="">Assign automatically if only one project exists</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="flex gap-3 pt-1">
                 <button type="submit" className="px-5 py-2.5 bg-teal-500 text-white rounded-xl text-sm font-semibold hover:bg-teal-600 shadow-sm transition-colors">Add Lead</button>

@@ -181,7 +181,14 @@ router.post('/meta/webhook', asyncHandler(async (req, res) => {
       } catch { continue; }
 
       const tenantId = integration.tenant_id;
-      const projectId = creds.project_id || null;
+      const { resolveProject } = require('../services/projectResolver');
+      const resolved = await resolveProject({
+        tenantId,
+        projectId: creds.project_id || null,
+        source: 'meta',
+        integrationKey: integration.integration_key,
+      });
+      const projectId = resolved.projectId;
 
       // Deduplicate
       const dupCheck = await db.query(
@@ -214,7 +221,16 @@ router.post('/meta/webhook', asyncHandler(async (req, res) => {
          RETURNING id`,
         [
           tenantId, projectId, name, cleanPhone, email || null, inquiry || null,
-          JSON.stringify({ meta_lead_id: leadgen_id, form_id, page_id, raw_fields: fields }),
+          JSON.stringify({
+            meta_lead_id: leadgen_id,
+            form_id,
+            page_id,
+            raw_fields: fields,
+            needs_project_assignment: Boolean(resolved.needsAssignment && !resolved.projectId),
+            project_assignment_reason: resolved.needsAssignment && !resolved.projectId
+              ? 'Assign a project so the AI knows what to sell.'
+              : resolved.resolution,
+          }),
         ]
       );
 

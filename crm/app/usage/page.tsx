@@ -33,6 +33,8 @@ function pct(num: number, den: number) {
 }
 
 interface Usage {
+  leads_processed?: number;
+  active_users?: number;
   calls_attempted: number;
   calls_connected: number;
   call_minutes_used: number;
@@ -181,7 +183,7 @@ export default function UsagePage() {
         <div className="mb-6 flex items-start justify-between">
           <div>
             <h1 className="font-serif text-3xl text-[var(--fg)]">Usage</h1>
-            <p className="text-sm text-[var(--fg-muted)] mt-0.5">{currentMonthLabel()} · Current month</p>
+            <p className="text-sm text-[var(--fg-muted)] mt-0.5">{currentMonthLabel()} · Billing readiness, not a plan limit</p>
           </div>
           <button
             onClick={() => window.location.reload()}
@@ -213,17 +215,27 @@ export default function UsagePage() {
         ) : (
           <div className="space-y-8">
 
-            {/* ── Billing Metrics ── */}
+            {/* ── This month ── */}
             <div>
-              <SectionTitle label="Billing" />
+              <SectionTitle label="This month" />
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                <StatCard
+                  label="Leads processed"
+                  value={u.leads_processed ?? 0}
+                  sub="Created this month"
+                />
+                <StatCard
+                  label="AI calls"
+                  value={u.calls_attempted || 0}
+                  sub="Attempts this month"
+                />
                 <StatCard
                   label="Calls Attempted"
                   value={u.calls_attempted || 0}
                   sub="Total this month"
                 />
                 <StatCard
-                  label="Calls Connected"
+                  label="Connected"
                   value={u.calls_connected || 0}
                   sub={u.calls_attempted ? pct(u.calls_connected || 0, u.calls_attempted) + ' connect rate' : undefined}
                   color="green"

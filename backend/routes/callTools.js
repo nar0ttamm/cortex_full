@@ -270,12 +270,30 @@ router.get('/calls/analytics', asyncHandler(async (req, res) => {
 // GET /v1/calls/usage/:tenantId — tenant usage summary for billing dashboard
 router.get('/calls/usage/:tenantId', asyncHandler(async (req, res) => {
   const { tenantId } = req.params;
+  if (req.tenantId && tenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Tenant mismatch' });
+  }
   const { month } = req.query; // YYYY-MM-DD optional
 
   const { getTenantUsage } = require('../services/usageTracker');
   const usage = await getTenantUsage(tenantId, month || undefined);
 
-  return res.json({ usage: usage || {}, tenant_id: tenantId });
+  const monthStart = month || new Date().toISOString().slice(0, 7) + '-01';
+  const extra = await db.query(
+    `SELECT
+        (SELECT COUNT(*)::int FROM leads WHERE tenant_id = $1 AND created_at >= $2::date) AS leads_processed,
+        (SELECT COUNT(*)::int FROM user_profiles WHERE tenant_id = $1) AS active_users`,
+    [tenantId, monthStart]
+  ).catch(() => ({ rows: [{ leads_processed: 0, active_users: 0 }] }));
+
+  return res.json({
+    usage: {
+      ...(usage || {}),
+      leads_processed: extra.rows[0]?.leads_processed ?? 0,
+      active_users: extra.rows[0]?.active_users ?? 0,
+    },
+    tenant_id: tenantId,
+  });
 }));
 
 module.exports = router;

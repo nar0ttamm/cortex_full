@@ -101,6 +101,7 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
       call_result: oc,
       last_call_at: new Date().toISOString(),
       appointment_requested: Boolean(appointment_requested),
+      last_summary: summary || undefined,
     };
 
     let newStatus = null;
@@ -196,15 +197,105 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
 
     await client.query('COMMIT');
 
-    // Post-commit: fire outcome-based notifications + usage tracking (best-effort)
+    // Post-commit: intelligence, callbacks, notifications, usage (best-effort)
     void (async () => {
       try {
         const leadRow = await db.query(
-          'SELECT id, name, phone, email FROM leads WHERE id = $1 AND tenant_id = $2',
+          `SELECT l.id, l.name, l.phone, l.email, l.status, l.project_id, l.metadata,
+                  lc.interest_level, lc.budget, lc.preferred_location, lc.property_type,
+                  lc.timeline, lc.callback_time, lc.objections, lc.last_summary
+             FROM leads l
+             LEFT JOIN lead_context lc ON lc.lead_id = l.id
+            WHERE l.id = $1 AND l.tenant_id = $2`,
           [lead_id, tenant_id]
         );
         const lead = leadRow.rows[0];
         if (!lead) return;
+
+        const { persistConversion } = require('../services/leadIntentExtractor');
+        const { scoreLead } = require('../services/leadScore');
+        const { deriveNextAction } = require('../services/nextAction');
+        const { parseCallbackWhen } = require('../services/callbackSchedule');
+        const { enqueueCall } = require('../services/callQueueService');
+
+        const callbackRaw = req.body.callback_time || req.body.callback_at || lead.callback_time || summary || '';
+        const callbackIso = outcome === 'callback' ? parseCallbackWhen(callbackRaw) : parseCallbackWhen(lead.callback_time);
+        if (outcome === 'callback' && callbackIso) {
+          await db.query(
+            `UPDATE leads
+             SET status = CASE WHEN status IN ('new','contacted') THEN 'callback_scheduled' ELSE status END,
+                 metadata = COALESCE(metadata, '{}') || $1::jsonb,
+                 updated_at = NOW()
+             WHERE id = $2 AND tenant_id = $3`,
+            [JSON.stringify({ scheduled_call_at: callbackIso, callback_requested: true }), lead_id, tenant_id]
+          );
+          await enqueueCall({
+            tenantId: tenant_id,
+            projectId: lead.project_id,
+            leadId: lead_id,
+            priority: 3,
+            scheduledAt: callbackIso,
+          }).catch((err) => console.warn('[calls/result] callback enqueue failed:', err.message));
+        } else if (outcome === 'callback' && !callbackIso) {
+          await db.query(
+            `UPDATE leads
+             SET metadata = COALESCE(metadata, '{}') || $1::jsonb, updated_at = NOW()
+             WHERE id = $2 AND tenant_id = $3`,
+            [JSON.stringify({ callback_requested: true, callback_time_unspecified: true }), lead_id, tenant_id]
+          );
+        }
+
+        const scored = scoreLead({
+          outcome: oc,
+          status: outcome === 'callback' && callbackIso ? 'callback_scheduled' : lead.status,
+          interest_level: req.body.interest_level || lead.interest_level,
+          timeline: req.body.timeline || lead.timeline,
+          budget: req.body.budget || lead.budget,
+          property_type: req.body.property_type || lead.property_type,
+          preferred_location: req.body.preferred_location || lead.preferred_location,
+          appointment_status: calendar.applied ? 'Scheduled' : lead.metadata?.appointment_status,
+          appointment_requested: Boolean(appointment_requested) || calendar.applied,
+          callback_requested: outcome === 'callback',
+          callback_time: callbackIso || lead.callback_time,
+          last_summary: summary || lead.last_summary,
+          objections: lead.objections,
+          connected: aiCallStatus === 'Completed',
+        });
+        const next = deriveNextAction({
+          needs_project_assignment: Boolean(lead.metadata?.needs_project_assignment),
+          human_handoff: scored.humanHandoff,
+          status: outcome === 'appointment_booked' && calendar.applied ? 'appointment_scheduled' : lead.status,
+          appointment_status: calendar.applied ? 'Scheduled' : lead.metadata?.appointment_status,
+          appointment_date: calendar.appointment_date || lead.metadata?.appointment_date,
+          scheduled_call_at: callbackIso || lead.metadata?.scheduled_call_at,
+          callback_time: callbackIso,
+          callback_requested: outcome === 'callback',
+          next_action_at: callbackIso || calendar.appointment_date,
+          call_initiated: true,
+          ai_call_status: aiCallStatus,
+        });
+        if (scored.humanHandoff && ['new', 'contacted', 'interested'].includes(String(lead.status))) {
+          await db.query(
+            `UPDATE leads SET status = 'qualified', updated_at = NOW() WHERE id = $1 AND tenant_id = $2 AND status IN ('new','contacted','interested')`,
+            [lead_id, tenant_id]
+          ).catch(() => {});
+        }
+        await persistConversion({
+          leadId: lead_id,
+          tenantId: tenant_id,
+          projectId: lead.project_id,
+          last_summary: summary || null,
+          last_outcome: oc,
+          score: scored.score,
+          temperature: scored.temperature,
+          next_action: next.key,
+          next_action_at: next.at,
+          human_handoff: scored.humanHandoff,
+          ai_confidence: scored.score == null ? 'unknown' : 'rule',
+          score_signals: scored.signals,
+          callback_time: callbackIso || lead.callback_time,
+          interest_level: req.body.interest_level || lead.interest_level,
+        });
 
         if (outcome === 'appointment_booked' && calendar.applied && calendar.appointment_date) {
           await sendAppointmentBookedNotifications({

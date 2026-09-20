@@ -5,13 +5,30 @@ const config = require('../config');
 const { VALID_STATUSES, STATUS_TRANSITIONS, getLeadById, getLeadByPhone, mergeLeadMetadata } = require('../services/leadService');
 const { sendLeadEntryNotifications, getAdminContact } = require('../services/notificationService');
 const { enqueueCall } = require('../services/callQueueService');
+const { resolveProject } = require('../services/projectResolver');
+const { buildConversionMetrics } = require('../services/conversionAnalytics');
+
+const LEAD_SELECT = `
+  SELECT l.*,
+         p.name AS project_name,
+         lc.score, lc.temperature, lc.next_action, lc.next_action_at, lc.human_handoff,
+         lc.last_summary, lc.interest_level, lc.budget, lc.preferred_location, lc.property_type,
+         lc.timeline, lc.callback_time, lc.score_signals, lc.ai_confidence, lc.preferred_product,
+         lc.decision_maker, lc.objections,
+         up.full_name AS assigned_name,
+         (SELECT MIN(c.started_at) FROM calls c WHERE c.lead_id = l.id AND c.tenant_id = l.tenant_id) AS first_call_at
+    FROM leads l
+    LEFT JOIN projects p ON p.id = l.project_id
+    LEFT JOIN lead_context lc ON lc.lead_id = l.id
+    LEFT JOIN user_profiles up ON up.id = l.assigned_to
+`;
 
 const router = Router();
 
 // POST /v1/lead/ingest
 // Create a new lead, fire notifications, schedule AI call
 router.post('/lead/ingest', asyncHandler(async (req, res) => {
-  const { tenant_id, name, phone, email, inquiry, source } = req.body;
+  const { tenant_id, name, phone, email, inquiry, source, project_id, projectId } = req.body;
 
   if (!tenant_id || !name || !phone) {
     return res.status(400).json({ error: 'Missing required fields: tenant_id, name, phone' });
@@ -26,6 +43,12 @@ router.post('/lead/ingest', asyncHandler(async (req, res) => {
     return res.json({ status: 'duplicate', lead: existing.rows[0] });
   }
 
+  const resolved = await resolveProject({
+    tenantId: tenant_id,
+    projectId: project_id || projectId || null,
+    source,
+  });
+
   const tenantResult = await db.query('SELECT settings FROM tenants WHERE id = $1', [tenant_id]);
   const fromSettings = tenantResult.rows[0]?.settings?.call_delay_seconds;
   const parsed = fromSettings != null ? parseInt(String(fromSettings), 10) : config.callDelaySeconds;
@@ -35,29 +58,38 @@ router.post('/lead/ingest', asyncHandler(async (req, res) => {
   const callDelaySeconds = Math.min(baseDelay, 60);
 
   const scheduledCallAt = new Date(Date.now() + callDelaySeconds * 1000).toISOString();
+  const needsProject = resolved.needsAssignment && !resolved.projectId;
 
   const initialMetadata = {
-    scheduled_call_at: scheduledCallAt,
+    scheduled_call_at: needsProject ? null : scheduledCallAt,
     call_initiated: false,
     calling_mode: config.callingMode,
+    needs_project_assignment: needsProject,
+    project_assignment_reason: needsProject
+      ? (resolved.activeCount > 1
+        ? 'Multiple projects exist — assign one before the AI calls.'
+        : 'Create or assign a project so the AI knows what to sell.')
+      : resolved.reason,
   };
 
   const result = await db.query(
-    `INSERT INTO leads (tenant_id, name, phone, email, inquiry, source, status, metadata, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'new', $7, NOW(), NOW())
-     RETURNING id, tenant_id, name, phone, email, status, created_at`,
-    [tenant_id, name, phone, email || null, inquiry || null, source || 'Unknown', JSON.stringify(initialMetadata)]
+    `INSERT INTO leads (tenant_id, project_id, name, phone, email, inquiry, source, status, metadata, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'new', $8, NOW(), NOW())
+     RETURNING id, tenant_id, project_id, name, phone, email, status, created_at`,
+    [tenant_id, resolved.projectId, name, phone, email || null, inquiry || null, source || 'Unknown', JSON.stringify(initialMetadata)]
   );
 
   const lead = result.rows[0];
 
-  await enqueueCall({
-    tenantId: tenant_id,
-    projectId: lead.project_id || null,
-    leadId: lead.id,
-    priority: 5,
-    scheduledAt: scheduledCallAt,
-  }).catch((err) => console.warn('[ingest] enqueue failed:', err.message));
+  if (!needsProject) {
+    await enqueueCall({
+      tenantId: tenant_id,
+      projectId: resolved.projectId,
+      leadId: lead.id,
+      priority: 5,
+      scheduledAt: scheduledCallAt,
+    }).catch((err) => console.warn('[ingest] enqueue failed:', err.message));
+  }
 
   const admin = await getAdminContact(tenant_id).catch(() => ({
     adminEmail: config.adminEmail,
@@ -71,7 +103,12 @@ router.post('/lead/ingest', asyncHandler(async (req, res) => {
     adminPhone: admin.adminPhone,
   }).catch((err) => console.error('[ingest] notification error:', err.message));
 
-  return res.status(201).json({ status: 'created', lead });
+  return res.status(201).json({
+    status: 'created',
+    lead,
+    project: { id: resolved.projectId, name: resolved.projectName, reason: resolved.reason },
+    queued: !needsProject,
+  });
 }));
 
 // GET /v1/leads/:tenantId
@@ -82,15 +119,15 @@ router.get('/leads/:tenantId', asyncHandler(async (req, res) => {
   }
   const { status, limit = 100 } = req.query;
 
-  let query = 'SELECT * FROM leads WHERE tenant_id = $1';
+  let query = `${LEAD_SELECT} WHERE l.tenant_id = $1`;
   const params = [tenantId];
 
   if (status) {
-    query += ' AND status = $2';
+    query += ' AND l.status = $2';
     params.push(status);
   }
 
-  query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
+  query += ' ORDER BY l.created_at DESC LIMIT $' + (params.length + 1);
   params.push(parseInt(limit, 10));
 
   const result = await db.query(query, params);
@@ -105,7 +142,7 @@ router.get('/leads/:tenantId/:leadId', asyncHandler(async (req, res) => {
     return res.status(403).json({ error: 'Tenant mismatch' });
   }
   const result = await db.query(
-    'SELECT * FROM leads WHERE tenant_id = $1 AND id = $2',
+    `${LEAD_SELECT} WHERE l.tenant_id = $1 AND l.id = $2`,
     [tenantId, leadId]
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
@@ -123,7 +160,7 @@ router.get('/leads/by-phone/:tenantId/:phone', asyncHandler(async (req, res) => 
 // PATCH /v1/leads/:leadId
 router.patch('/leads/:leadId', asyncHandler(async (req, res) => {
   const { leadId } = req.params;
-  const { status, metadata } = req.body;
+  const { status, metadata, project_id, projectId, assigned_to, assignedTo } = req.body;
 
   const updates = [];
   const params = [];
@@ -131,6 +168,10 @@ router.patch('/leads/:leadId', asyncHandler(async (req, res) => {
 
   if (status !== undefined) { updates.push(`status = $${i++}`); params.push(status); }
   if (metadata !== undefined) { updates.push(`metadata = $${i++}`); params.push(JSON.stringify(metadata)); }
+  const nextProject = project_id || projectId;
+  if (nextProject !== undefined) { updates.push(`project_id = $${i++}`); params.push(nextProject || null); }
+  const nextAssignee = assigned_to !== undefined ? assigned_to : assignedTo;
+  if (nextAssignee !== undefined) { updates.push(`assigned_to = $${i++}`); params.push(nextAssignee || null); }
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
 
   updates.push('updated_at = NOW()');
@@ -144,7 +185,32 @@ router.patch('/leads/:leadId', asyncHandler(async (req, res) => {
     params
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
-  return res.json({ status: 'updated', lead: result.rows[0] });
+  const updated = result.rows[0];
+
+  if (nextProject && updated.metadata?.needs_project_assignment) {
+    const scheduledCallAt = new Date(Date.now() + 60 * 1000).toISOString();
+    await db.query(
+      `UPDATE leads
+       SET metadata = COALESCE(metadata, '{}') || $1::jsonb, updated_at = NOW()
+       WHERE id = $2 AND tenant_id = COALESCE($3, tenant_id)`,
+      [JSON.stringify({
+        needs_project_assignment: false,
+        scheduled_call_at: scheduledCallAt,
+        project_assignment_reason: 'assigned',
+      }), leadId, req.tenantId || null]
+    ).catch(() => {});
+    if (!updated.metadata?.call_initiated) {
+      await enqueueCall({
+        tenantId: updated.tenant_id,
+        projectId: nextProject,
+        leadId,
+        priority: 5,
+        scheduledAt: scheduledCallAt,
+      }).catch((err) => console.warn('[leads] enqueue after project assign failed:', err.message));
+    }
+  }
+
+  return res.json({ status: 'updated', lead: updated });
 }));
 
 // POST /v1/lead/status  — validated status transition
@@ -227,6 +293,18 @@ router.post('/lead/metadata', asyncHandler(async (req, res) => {
   }
   await mergeLeadMetadata(lead_id, metadata);
   return res.json({ status: 'updated', lead_id });
+}));
+
+// GET /v1/analytics/conversion?tenantId=
+router.get('/analytics/conversion', asyncHandler(async (req, res) => {
+  const tenantId = req.tenantId || req.query.tenantId;
+  if (!tenantId) return res.status(400).json({ error: 'tenantId required' });
+
+  const leads = await db.query(`${LEAD_SELECT} WHERE l.tenant_id = $1`, [tenantId]);
+  const tenant = await db.query(`SELECT settings FROM tenants WHERE id = $1`, [tenantId]);
+  const averageDealValue = tenant.rows[0]?.settings?.average_deal_value ?? null;
+  const conversion = buildConversionMetrics(leads.rows, { averageDealValue });
+  return res.json({ conversion, averageDealValue });
 }));
 
 module.exports = router;

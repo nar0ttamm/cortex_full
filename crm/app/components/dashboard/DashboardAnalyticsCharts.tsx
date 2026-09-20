@@ -16,11 +16,31 @@ const STATUS_HREF: Record<string, string> = {
 
 const FUNNEL_HREF: Record<string, string> = {
   'Total Leads': '/leads',
+  Leads: '/leads',
   Called: '/calls',
+  Connected: '/calls',
+  Qualified: '/leads?status=interested',
   Interested: '/leads?status=interested',
+  Appointments: '/appointments',
   'Appt Scheduled': '/appointments',
   Confirmed: '/leads?status=confirmed',
 };
+
+function fmtSeconds(sec: number | null | undefined) {
+  if (sec == null) return 'Not tracked';
+  if (sec < 90) return `${sec} sec`;
+  if (sec < 3600) return `${Math.round(sec / 60)} min`;
+  return `${(sec / 3600).toFixed(1)} h`;
+}
+
+function fmtRate(value: number | null | undefined) {
+  return value == null ? 'Not tracked' : `${value}%`;
+}
+
+function fmtMoney(value: number | null | undefined) {
+  if (value == null) return 'Not available';
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
+}
 
 const CALL_HREF: Record<string, string> = {
   Done: '/calls',
@@ -299,6 +319,17 @@ export function DashboardAnalyticsCharts({
   }
 
   const k = analytics.analyticsKpis;
+  const c = analytics.conversion;
+  const funnelSteps = c
+    ? [
+        { label: 'Leads', value: c.funnel.leads, color: '#e24b1b' },
+        { label: 'Called', value: c.funnel.called, color: '#1a6b63' },
+        { label: 'Connected', value: c.funnel.connected, color: '#0f766e' },
+        { label: 'Qualified', value: c.funnel.qualified, color: '#c4841d' },
+        { label: 'Appointments', value: c.funnel.appointments, color: '#f06a3a' },
+        { label: 'Confirmed', value: c.funnel.confirmed, color: '#1a6b63' },
+      ]
+    : analytics.funnel;
 
   return (
     <div
@@ -310,9 +341,11 @@ export function DashboardAnalyticsCharts({
         <div>
           <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <span className="w-1 h-5 bg-gradient-to-b from-violet-500 to-teal-500 rounded-full" />
-            Insights & charts
+            Conversion
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Funnels, sources, and trends — export or share as images</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Leads contacted, qualified, and converted — not call volume
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -340,32 +373,97 @@ export function DashboardAnalyticsCharts({
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard href="/leads" label="Total Leads" value={k.total} color="#e24b1b" />
-        <StatCard href="/leads?status=new" label="New" value={newLeads} color="#1a6b63" />
+        <StatCard href="/leads" label="Leads in" value={c?.funnel.leads ?? k.total} color="#e24b1b" />
+        <StatCard href="/calls" label="Contacted" value={c?.funnel.called ?? newLeads} sub={fmtRate(c?.rates.contactRate)} color="#1a6b63" />
         <StatCard
           href="/leads?status=interested"
-          label="Interested"
-          value={k.interested}
-          sub={`${k.total > 0 ? Math.round((k.interested / k.total) * 100) : 0}% of total`}
+          label="Qualified"
+          value={c?.funnel.qualified ?? k.interested}
+          sub={fmtRate(c?.rates.qualificationRate)}
           color="#1a6b63"
         />
-        <StatCard href="/calls" label="Active Calls" value={activeCalls} color="#7c3aed" />
-        <StatCard href="/appointments" label="Appts Today" value={appointmentsToday} color="#db2777" />
+        <StatCard href="/appointments" label="Appointments" value={c?.funnel.appointments ?? appointmentsToday} sub={fmtRate(c?.rates.leadToAppointmentRate)} color="#db2777" />
+        <StatCard
+          label="Time to first call"
+          value={fmtSeconds(c?.timeToFirstCall.averageSec)}
+          sub={c?.timeToFirstCall.sampleSize ? `Median ${fmtSeconds(c.timeToFirstCall.medianSec)}` : 'Not tracked yet'}
+          color="#7c3aed"
+        />
         <StatCard
           href="/leads?status=confirmed"
-          label="Conversion"
-          value={`${k.conversionRate}%`}
-          sub="New → Confirmed"
+          label="Confirmed"
+          value={c?.funnel.confirmed ?? k.converted}
+          sub={fmtRate(c?.rates.confirmationRate)}
           color="#e24b1b"
         />
       </div>
+
+      {c && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <ChartCard title="Needs attention" chartId="chart-attention">
+            {c.needsAttention.length === 0 ? (
+              <p className="text-xs text-slate-400 py-6 text-center">No hot or blocked leads right now.</p>
+            ) : (
+              <div className="space-y-3">
+                {c.needsAttention.map((row) => (
+                  <Link
+                    key={row.id}
+                    href={`/leads/${row.id}`}
+                    className="block rounded-xl border border-slate-100 dark:border-slate-700 px-3 py-2.5 hover:border-teal-300 dark:hover:border-teal-700"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{row.name}</p>
+                      <span className="text-xs font-bold text-slate-600">
+                        {row.score == null ? '—' : `${row.score}/100`}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                      {[row.requirement, row.location, row.next_action?.replace(/_/g, ' ')].filter(Boolean).join(' · ') || 'Needs review'}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </ChartCard>
+          <ChartCard title="Source → opportunities" chartId="chart-source-funnel">
+            {c.sourceFunnel.length === 0 ? (
+              <p className="text-xs text-slate-400 py-6 text-center">No source data yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {c.sourceFunnel.slice(0, 6).map((src) => (
+                  <Link key={src.source} href={`/leads?source=${encodeURIComponent(src.source)}`} className="block">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      <span>{src.source || 'Unknown'}</span>
+                      <span>{src.leads} leads</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {src.called} called · {src.qualified} qualified · {src.appointments} appointments
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </ChartCard>
+          <ChartCard title="Estimated pipeline" chartId="chart-pipeline">
+            <p className="text-3xl font-bold text-slate-800 dark:text-slate-100">
+              {c.estimatedPipeline == null ? 'Not configured' : fmtMoney(c.estimatedPipeline)}
+            </p>
+            <p className="text-xs text-slate-500 mt-2">
+              {c.estimatedPipeline == null
+                ? 'Estimated pipeline — Not configured. Set average deal value in Tenant settings.'
+                : 'Estimated pipeline only. Not revenue generated.'}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-3">Active calls now: {activeCalls}</p>
+          </ChartCard>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <ChartCard title="Leads — Last 7 Days" chartId="chart-trend">
           <BarChart data={analytics.trend} hrefFor={() => '/leads'} />
         </ChartCard>
         <ChartCard title="Conversion Funnel" chartId="chart-funnel">
-          <Funnel steps={analytics.funnel} hrefFor={(label) => FUNNEL_HREF[label]} />
+          <Funnel steps={funnelSteps} hrefFor={(label) => FUNNEL_HREF[label]} />
         </ChartCard>
       </div>
 

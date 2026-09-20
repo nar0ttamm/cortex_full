@@ -374,7 +374,10 @@ function LeadsPage() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{lead.name || 'N/A'}</p>
-                        <p className="text-xs text-slate-400">{lead.phone || 'N/A'}</p>
+                        <p className="text-xs text-slate-400">
+                          {lead.phone || 'N/A'}
+                          {lead.score != null ? ` · ${lead.score}` : ''}
+                        </p>
                       </div>
                     </div>
                     <span className={`shrink-0 px-2 py-0.5 text-[10px] font-bold rounded-full border uppercase tracking-wide ${getStatusColor(lead.status || '')}`}>
@@ -425,7 +428,11 @@ function LeadsPage() {
                             <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
                               {lead.name || 'N/A'}
                             </p>
-                            {lead.source && <p className="text-xs text-slate-400 mt-0.5">{lead.source}</p>}
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              {lead.project_name || 'No project'}
+                              {lead.source ? ` · ${lead.source}` : ''}
+                              {lead.score != null ? ` · ${lead.score}/100 ${lead.temperature || ''}` : ''}
+                            </p>
                           </Link>
                         </td>
                         <td className="px-5 py-3.5">

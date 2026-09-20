@@ -97,12 +97,25 @@ async function processWebhookPayload({ tenantId, integrationKey, payload, skipSe
     ...(normalized.metadata || {}),
   };
 
+  const { resolveProject } = require('../services/projectResolver');
+  const resolved = await resolveProject({
+    tenantId,
+    projectId: payload.project_id || payload.projectId || normalized.metadata?.project_id || null,
+    source: normalized.source,
+    metadata: normalized.metadata,
+    integrationKey,
+  });
+  const needsProject = resolved.needsAssignment && !resolved.projectId;
+  initialMetadata.needs_project_assignment = needsProject;
+  if (needsProject) initialMetadata.scheduled_call_at = null;
+
   const insertResult = await db.query(
-    `INSERT INTO leads (tenant_id, name, phone, email, inquiry, source, status, metadata, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'new', $7, NOW(), NOW())
+    `INSERT INTO leads (tenant_id, project_id, name, phone, email, inquiry, source, status, metadata, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'new', $8, NOW(), NOW())
      RETURNING id`,
     [
       tenantId,
+      resolved.projectId,
       normalized.name,
       normalized.phone,
       normalized.email || null,
@@ -114,16 +127,19 @@ async function processWebhookPayload({ tenantId, integrationKey, payload, skipSe
 
   const leadId = insertResult.rows[0].id;
 
-  try {
-    const { enqueueCall } = require('../services/callQueueService');
-    await enqueueCall({
-      tenantId,
-      leadId,
-      priority: 5,
-      scheduledAt: scheduledCallAt,
-    });
-  } catch (err) {
-    console.warn('[webhook] enqueue failed:', err.message);
+  if (!needsProject) {
+    try {
+      const { enqueueCall } = require('../services/callQueueService');
+      await enqueueCall({
+        tenantId,
+        projectId: resolved.projectId,
+        leadId,
+        priority: 5,
+        scheduledAt: scheduledCallAt,
+      });
+    } catch (err) {
+      console.warn('[webhook] enqueue failed:', err.message);
+    }
   }
 
   await logIntegrationEvent(tenantId, integrationKey, 'success', payload, leadId);

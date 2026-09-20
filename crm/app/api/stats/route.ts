@@ -7,6 +7,26 @@ import { buildDashboardAnalytics } from '@/lib/analyticsFromLeads';
 import { DashboardStats, type DashboardAnalyticsPayload } from '@/types';
 import { getBackendAuthHeaders } from '@/lib/backendAuth.server';
 
+async function fetchConversion(tenantId: string): Promise<DashboardAnalyticsPayload['conversion']> {
+  const base = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '';
+  if (!base) return null;
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${base}/v1/analytics/conversion?tenantId=${encodeURIComponent(tenantId)}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: await getBackendAuthHeaders(),
+    });
+    clearTimeout(t);
+    if (!res.ok) return null;
+    const j = (await res.json()) as { conversion?: DashboardAnalyticsPayload['conversion'] };
+    return j.conversion ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchCallsActiveCount(tenantId: string): Promise<number> {
   const base = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '';
   if (!base) return 0;
@@ -30,9 +50,10 @@ async function fetchCallsActiveCount(tenantId: string): Promise<number> {
 export async function GET() {
   try {
     const { tenantId } = await requireAuth();
-    const [leads, activeCallsFromDb] = await Promise.all([
+    const [leads, activeCallsFromDb, conversion] = await Promise.all([
       getLeadsFromSupabase(tenantId),
       fetchCallsActiveCount(tenantId),
+      fetchConversion(tenantId),
     ]);
 
     const totalLeads = leads.length;
@@ -79,7 +100,10 @@ export async function GET() {
       confirmedAppointments,
     };
 
-    const analytics: DashboardAnalyticsPayload = buildDashboardAnalytics(leads);
+    const analytics: DashboardAnalyticsPayload = {
+      ...buildDashboardAnalytics(leads),
+      conversion,
+    };
 
     return NextResponse.json({ stats, analytics });
   } catch (error: unknown) {
