@@ -58,17 +58,8 @@ export default function ProjectsPage() {
     return () => window.removeEventListener('cortex:project-created', onCreated);
   }, [load]);
 
-  const actions = (
-    <button
-      onClick={() => (document.querySelector('[data-action="new-project"]') as HTMLButtonElement)?.click()}
-      className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--accent-soft)] text-[var(--accent)] rounded-lg text-xs font-semibold border border-[var(--accent)]/20 hover:bg-[var(--accent)] hover:text-white transition-colors"
-    >
-      New project
-    </button>
-  );
-
   return (
-    <AppShell title="Projects" actions={actions}>
+    <AppShell title="Projects">
       <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-5">
         <div className="cf-card p-5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--fg-muted)]">Campaigns</p>
