@@ -1,5 +1,6 @@
-// Supabase Auth helpers — session and tenant (user id = tenant id, or user_metadata.tenant_id for override)
+// Supabase Auth helpers. Tenant comes from user_profiles (same source as the backend JWT check).
 
+import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 
 export type AuthUser = {
@@ -7,24 +8,46 @@ export type AuthUser = {
   email?: string;
 };
 
-/** Effective tenant_id: user_metadata.tenant_id if set (e.g. for testing), else user.id */
-function effectiveTenantId(user: { id: string; user_metadata?: Record<string, unknown> }): string {
-  const fromMeta = user.user_metadata?.tenant_id;
-  if (typeof fromMeta === 'string' && fromMeta.trim()) return fromMeta.trim();
-  return user.id;
+/**
+ * Membership tenant — must match backend/middleware/auth.js resolveTenantForUser.
+ * Do not use user_metadata.tenant_id: the backend ignores it, so the dashboard
+ * would call /v1/leads/<metadata> and get 403 Tenant mismatch.
+ */
+async function resolveTenantId(userId: string): Promise<string> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (url && serviceKey) {
+    try {
+      const admin = createAdminClient(url, serviceKey);
+      const { data } = await admin
+        .from('user_profiles')
+        .select('tenant_id')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (typeof data?.tenant_id === 'string' && data.tenant_id.trim()) {
+        return data.tenant_id.trim();
+      }
+    } catch (err) {
+      console.warn('[auth] user_profiles lookup failed', err);
+    }
+  }
+  return userId;
 }
 
 /**
  * Get current session and user. Returns null if not authenticated.
- * tenantId = user_metadata.tenant_id (if set) or user.id.
+ * tenantId = user_profiles.tenant_id, else user.id (legacy owner).
  */
 export async function getSession(): Promise<{ user: AuthUser; tenantId: string } | null> {
   const supabase = await createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
   if (error || !user) return null;
   return {
     user: { id: user.id, email: user.email ?? undefined },
-    tenantId: effectiveTenantId(user),
+    tenantId: await resolveTenantId(user.id),
   };
 }
 

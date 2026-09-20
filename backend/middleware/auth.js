@@ -33,6 +33,8 @@ async function resolveTenantForUser(userId) {
     };
   }
   // Legacy owner: tenant id was created as the auth user id.
+  // Do not read auth.users.raw_user_meta_data.tenant_id here — that value
+  // diverged from user_profiles and caused CRM 403 Tenant mismatch.
   return { tenantId: userId, role: 'admin', isActive: true };
 }
 

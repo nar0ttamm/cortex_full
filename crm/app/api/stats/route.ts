@@ -87,6 +87,9 @@ export async function GET() {
     if (err.message === 'Authentication required') {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
+    if (err.message === 'Tenant mismatch') {
+      return NextResponse.json({ error: 'Tenant mismatch' }, { status: 403 });
+    }
     const isBackendUnreachable =
       err.message === 'fetch failed' ||
       err.cause?.code === 'ECONNREFUSED' ||

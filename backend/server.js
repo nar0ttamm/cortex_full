@@ -36,6 +36,15 @@ app.use((req, res, next) => {
   return next();
 });
 
+app.get('/v1/me', (req, res) => {
+  res.json({
+    userId: req.userId,
+    email: req.userEmail,
+    tenantId: req.tenantId,
+    role: req.role,
+  });
+});
+
 app.use('/v1/demo/request', rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
