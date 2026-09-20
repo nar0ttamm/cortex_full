@@ -1,3 +1,5 @@
+import { getBackendAuthHeaders } from './backendAuth';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '';
 
 export type CallRow = {
@@ -29,7 +31,7 @@ export async function fetchCallsForTenant(
   if (opts?.leadId) q.set('lead_id', opts.leadId);
 
   const url = `${API_URL}/v1/calls/${encodeURIComponent(tenantId.trim())}${q.toString() ? `?${q}` : ''}`;
-  const res = await fetch(url, { cache: 'no-store' });
+  const res = await fetch(url, { cache: 'no-store', headers: await getBackendAuthHeaders() });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -45,7 +47,7 @@ export async function startAiCall(tenantId: string, leadId: string): Promise<{ c
 
   const res = await fetch(`${API_URL}/v1/calls/start`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await getBackendAuthHeaders(),
     body: JSON.stringify({ tenant_id: tid, lead_id: lid }),
   });
 

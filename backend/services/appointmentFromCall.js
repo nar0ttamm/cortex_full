@@ -88,6 +88,21 @@ async function applyVoiceScheduledAppointment(p, dbClient = null) {
     [newStatus, JSON.stringify(updatedMeta), lead_id, tenant_id]
   );
 
+  await q(
+    `INSERT INTO appointments (tenant_id, lead_id, project_id, scheduled_at, title, notes, status)
+     SELECT $1, $2, l.project_id, $3, $4, $5, 'scheduled'
+     FROM leads l WHERE l.id = $2 AND l.tenant_id = $1`,
+    [
+      tenant_id,
+      lead_id,
+      dt.toISOString(),
+      `Site visit — ${lead.status || 'lead'}`,
+      noteLine.slice(0, 2000),
+    ]
+  ).catch((err) => {
+    console.warn('[appointmentFromCall] appointments insert skipped:', err.message);
+  });
+
   return { applied: true, appointment_date: dt.toISOString() };
 }
 

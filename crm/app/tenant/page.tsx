@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { useTenantId } from '@/app/hooks/useTenantId';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -63,7 +64,9 @@ export default function TenantPage() {
     if (!tenantId || !API_URL) return;
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/v1/tenant/${tenantId}`);
+      const res = await fetch(`${API_URL}/v1/tenant/${tenantId}`, {
+        headers: await getBackendAuthHeaders(),
+      });
       if (!res.ok) throw new Error('Failed to fetch tenant');
       const data = await res.json();
       const t = data.tenant;
@@ -94,7 +97,7 @@ export default function TenantPage() {
       const { name, ...rest } = form;
       const res = await fetch(`${API_URL}/v1/tenant/${tenantId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getBackendAuthHeaders(),
         body: JSON.stringify({
           name,
           settings: {

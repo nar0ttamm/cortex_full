@@ -82,58 +82,20 @@ router.post('/demo/request', asyncHandler(async (req, res) => {
     );
     callTriggered = true;
 
-    // Trigger AI call (fire-and-forget, do not block response)
-    const voiceServiceUrl = config.voiceServiceUrl;
-    if (voiceServiceUrl) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 25000);
-
-      fetch(`${voiceServiceUrl}/voice/start-call`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-voice-secret': config.voiceSecret || '',
-        },
-        body: JSON.stringify({
-          tenant_id: tenantId,
-          lead_id: leadId,
-          phone,
-          name,
-          call_script: `Hello ${name} ji, main CortexFlow ki taraf se aapko ek live demo dene ke liye call kar raha hoon. Kya aap abhi baat kar sakte hain?`,
-          demo_mode: true,
-        }),
-        signal: controller.signal,
+    const { startOutboundCall } = require('../services/startOutboundCall');
+    startOutboundCall({ tenantId, leadId, isDemo: true })
+      .then(async () => {
+        await db.query(
+          `UPDATE demo_requests SET call_completed = true, call_completed_at = now(), status = 'completed' WHERE id = $1`,
+          [demoRequestId]
+        );
       })
-        .then(async (r) => {
-          clearTimeout(timeout);
-          if (r.ok) {
-            await db.query(
-              `UPDATE demo_requests SET call_completed = true, call_completed_at = now(), status = 'completed' WHERE id = $1`,
-              [demoRequestId]
-            );
-          } else {
-            const err = await r.json().catch(() => ({}));
-            const msg = err.error || `Voice service returned ${r.status}`;
-            await db.query(
-              `UPDATE demo_requests SET status = 'failed', error_log = error_log || $1::jsonb WHERE id = $2`,
-              [JSON.stringify([{ stage: 'call', error: msg, ts: new Date().toISOString() }]), demoRequestId]
-            );
-          }
-        })
-        .catch(async (err) => {
-          clearTimeout(timeout);
-          await db.query(
-            `UPDATE demo_requests SET status = 'failed', error_log = error_log || $1::jsonb WHERE id = $2`,
-            [JSON.stringify([{ stage: 'call', error: err.message, ts: new Date().toISOString() }]), demoRequestId]
-          );
-        });
-    } else {
-      errors.push({ stage: 'call', error: 'VOICE_SERVICE_URL not configured' });
-      await db.query(
-        `UPDATE demo_requests SET error_log = error_log || $1::jsonb WHERE id = $2`,
-        [JSON.stringify(errors), demoRequestId]
-      );
-    }
+      .catch(async (err) => {
+        await db.query(
+          `UPDATE demo_requests SET status = 'failed', error_log = error_log || $1::jsonb WHERE id = $2`,
+          [JSON.stringify([{ stage: 'call', error: err.message, ts: new Date().toISOString() }]), demoRequestId]
+        );
+      });
   } catch (err) {
     errors.push({ stage: 'lead_creation', error: err.message });
     await db.query(
@@ -208,27 +170,13 @@ router.post('/demo/whatsapp-interaction', asyncHandler(async (req, res) => {
     [demo_request_id]
   );
 
-  fetch(`${voiceServiceUrl}/voice/start-call`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-voice-secret': config.voiceSecret || '',
-    },
-    body: JSON.stringify({
-      tenant_id: tenantId,
-      lead_id: leadId,
-      phone: demo.whatsapp_number,
-      name: demo.name,
-      demo_mode: true,
-    }),
-  })
-    .then(async (r) => {
-      if (r.ok) {
-        await db.query(
-          `UPDATE demo_requests SET call_completed = true, call_completed_at = now(), status = 'completed' WHERE id = $1`,
-          [demo_request_id]
-        );
-      }
+  const { startOutboundCall } = require('../services/startOutboundCall');
+  startOutboundCall({ tenantId, leadId, isDemo: true })
+    .then(async () => {
+      await db.query(
+        `UPDATE demo_requests SET call_completed = true, call_completed_at = now(), status = 'completed' WHERE id = $1`,
+        [demo_request_id]
+      );
     })
     .catch(() => {});
 

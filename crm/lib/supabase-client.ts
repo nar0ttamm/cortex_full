@@ -1,6 +1,8 @@
 // Backend API client for leads (CRM talks to Backend API, not Supabase directly).
 // File name kept as supabase-client for minimal change to existing imports.
 
+import { getBackendAuthHeaders } from './backendAuth';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 if (!API_URL && typeof window === 'undefined') {
   console.warn('[supabase-client] NEXT_PUBLIC_API_URL is not set. Set it in .env.local or use vercel dev.');
@@ -10,16 +12,15 @@ async function fetchApi(path: string, options?: RequestInit) {
   const base = API_URL?.replace(/\/$/, '') || '';
   if (!base) throw new Error('NEXT_PUBLIC_API_URL is not set');
 
-  // 15s timeout — prevents Vercel's 10s function limit from silently killing requests
-  // and surfaces a clean error instead of an opaque 504/500.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
+  const authHeaders = await getBackendAuthHeaders();
 
   try {
     const res = await fetch(base + path, {
       ...options,
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...options?.headers },
+      headers: { ...authHeaders, ...options?.headers },
     });
     clearTimeout(timer);
     if (!res.ok) {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { useTenantId } from '@/app/hooks/useTenantId';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
 
 const API = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
 
@@ -138,9 +139,10 @@ export default function UsagePage() {
       setLoading(true);
       setError(null);
       try {
+        const headers = await getBackendAuthHeaders();
         const [uRes, aRes] = await Promise.all([
-          fetch(`${API}/v1/calls/usage/${encodeURIComponent(tenantId)}`),
-          fetch(`${API}/v1/calls/analytics?tenant_id=${encodeURIComponent(tenantId)}&limit=500`),
+          fetch(`${API}/v1/calls/usage/${encodeURIComponent(tenantId)}`, { headers }),
+          fetch(`${API}/v1/calls/analytics?tenant_id=${encodeURIComponent(tenantId)}&limit=500`, { headers }),
         ]);
 
         if (uRes.ok) {

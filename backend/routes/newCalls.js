@@ -1,17 +1,15 @@
 const { Router } = require('express');
 const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
-const config = require('../config');
 const { applyVoiceScheduledAppointment } = require('../services/appointmentFromCall');
 const {
   sendAppointmentBookedNotifications,
   sendCallbackNotifications,
 } = require('../services/notificationService');
-const { buildCallContext } = require('../services/callContextBuilder');
-const { selectProducts } = require('../services/productSelector');
-const { extractAndStoreIntent } = require('../services/leadIntentExtractor');
-const { trackUsage, trackCallOutcome } = require('../services/usageTracker');
+const { trackCallOutcome } = require('../services/usageTracker');
 const { scheduleRetry, updateQueueStatus, canAttemptLead } = require('../services/callQueueService');
+const { startOutboundCall, StartCallError } = require('../services/startOutboundCall');
+const { requireVoiceSecret } = require('../middleware/auth');
 
 // Outcomes that should NOT trigger a retry
 const NO_RETRY_OUTCOMES = new Set([
@@ -31,156 +29,16 @@ const router = Router();
 // uuid-typed column (which would otherwise throw a Postgres cast error → 500).
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Voice service secret guard (only voice-service can POST results)
-function requireVoiceSecret(req, res, next) {
-  const secret = req.headers['x-voice-secret'];
-  if (config.voiceSecret && secret !== config.voiceSecret) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  return next();
-}
-
 // POST /v1/calls/start
-// Schedules and initiates an outbound AI call via cortex_voice service
 router.post('/calls/start', asyncHandler(async (req, res) => {
-  const tenant_id = typeof req.body.tenant_id === 'string' ? req.body.tenant_id.trim() : req.body.tenant_id;
+  const tenant_id = req.tenantId || (typeof req.body.tenant_id === 'string' ? req.body.tenant_id.trim() : req.body.tenant_id);
   const lead_id = typeof req.body.lead_id === 'string' ? req.body.lead_id.trim() : req.body.lead_id;
-  if (!tenant_id || !lead_id) {
-    return res.status(400).json({ error: 'Missing required fields: tenant_id, lead_id' });
-  }
-
-  const leadResult = await db.query(
-    'SELECT id, name, phone, inquiry, project_id FROM leads WHERE id = $1 AND tenant_id = $2',
-    [lead_id, tenant_id]
-  );
-  if (leadResult.rows.length === 0) {
-    return res.status(404).json({ error: 'Lead not found' });
-  }
-  const lead = leadResult.rows[0];
-
-  const voiceServiceUrl = config.voiceServiceUrl;
-  if (!voiceServiceUrl) {
-    return res.status(503).json({ error: 'Voice service not configured. Set VOICE_SERVICE_URL or LIVEKIT_URL env var.' });
-  }
-
-  // ── Idempotency guard: atomically claim the lead for calling ─────────────────
-  // Uses a conditional UPDATE so concurrent requests are serialised at the DB level.
-  // Any request that loses the race gets a 409 — no duplicate SIP calls.
-  const guard = await db.query(
-    `UPDATE leads
-     SET metadata    = COALESCE(metadata, '{}') || '{"ai_call_status":"In Progress"}'::jsonb,
-         updated_at  = NOW()
-     WHERE id        = $1
-       AND tenant_id = $2
-       AND COALESCE(metadata->>'ai_call_status', '') != 'In Progress'
-     RETURNING id`,
-    [lead_id, tenant_id]
-  );
-  if (guard.rowCount === 0) {
-    return res.status(409).json({
-      error: 'A call is already in progress for this lead. Please wait for it to complete before starting another.',
-    });
-  }
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  // ── V3: Build compact call brief using context builder + product selector ────
-  let call_brief = null;
   try {
-    // Extract and store lead intent (Phase 3)
-    await extractAndStoreIntent({
-      leadId: lead_id,
-      tenantId: tenant_id,
-      projectId: lead.project_id || null,
-      inquiry: lead.inquiry || '',
-    }).catch(() => {});
-
-    // Build compact call context (Phase 1)
-    const callContext = await buildCallContext({ tenantId: tenant_id, leadId: lead_id });
-
-    // Select relevant products using rule-based matching (Phase 2)
-    let initial_products = [];
-    if (lead.project_id) {
-      initial_products = await selectProducts({
-        projectId: lead.project_id,
-        tenantId: tenant_id,
-        leadContext: {
-          inquiry: lead.inquiry || '',
-          preferred_location: callContext.call_context.lead_location,
-          property_type: callContext.call_context.lead_property_type,
-          budget: callContext.call_context.lead_budget,
-        },
-      });
-    }
-
-    call_brief = {
-      ...callContext,
-      initial_products,
-    };
-  } catch (briefErr) {
-    console.warn('[calls/start] call_brief build failed (non-critical):', briefErr.message);
-    // Fall back to legacy kb_context if brief fails — keep calls working
-  }
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  // Track attempt once — at start only; result handler tracks outcome separately
-  void trackUsage(tenant_id, 'calls_attempted').catch(() => {});
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25000);
-
-  try {
-    const response = await fetch(`${voiceServiceUrl}/voice/start-call`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-voice-secret': config.voiceSecret || '',
-      },
-      body: JSON.stringify({
-        tenant_id,
-        lead_id,
-        phone: lead.phone,
-        name: lead.name,
-        call_script: lead.inquiry || undefined,
-        call_brief,
-      }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      const upstream = err && typeof err.error === 'string' ? err.error : '';
-      const hint =
-        upstream === 'Unauthorized'
-          ? 'Voice service rejected the request (VOICE_SECRET must match on Vercel backend and voice VM).'
-          : 'Voice service error';
-      return res.status(502).json({ error: hint, details: err });
-    }
-
-    const result = await response.json();
-
-    await db.query(
-      `UPDATE leads
-       SET metadata   = COALESCE(metadata, '{}') || '{"call_initiated":true}'::jsonb,
-           updated_at = NOW()
-       WHERE id = $1`,
-      [lead_id]
-    );
-
-    return res.json({ status: 'initiated', call_id: result.call_id, lead_id });
+    const result = await startOutboundCall({ tenantId: tenant_id, leadId: lead_id });
+    return res.json(result);
   } catch (err) {
-    clearTimeout(timeout);
-    // Release the in-progress lock so the operator can retry manually
-    await db.query(
-      `UPDATE leads
-       SET metadata   = COALESCE(metadata, '{}') || '{"ai_call_status":"Failed"}'::jsonb,
-           updated_at = NOW()
-       WHERE id = $1`,
-      [lead_id]
-    ).catch(() => {});
-    if (err.name === 'AbortError') {
-      return res.status(504).json({ error: 'Voice service timeout' });
+    if (err instanceof StartCallError) {
+      return res.status(err.status).json({ error: err.message, ...err.extra });
     }
     throw err;
   }
@@ -314,6 +172,28 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
       calendar = { applied: false, reason: 'calendar_error' };
     }
 
+    const callStatus = aiCallStatus === 'Failed' ? 'failed' : 'completed';
+    await client.query(
+      `INSERT INTO calls (id, tenant_id, lead_id, phone, status, outcome, duration_seconds, started_at, ended_at, created_at, updated_at)
+       SELECT $1, l.tenant_id, l.id, l.phone, $2, $3, $4, NOW() - ($4::int * interval '1 second'), NOW(), NOW(), NOW()
+       FROM leads l WHERE l.id = $5 AND l.tenant_id = $6
+       ON CONFLICT (id) DO UPDATE SET
+         status = EXCLUDED.status,
+         outcome = EXCLUDED.outcome,
+         duration_seconds = EXCLUDED.duration_seconds,
+         ended_at = NOW(),
+         updated_at = NOW()`,
+      [call_id, callStatus, oc, duration_seconds || 0, lead_id, tenant_id]
+    );
+    await client.query(
+      `INSERT INTO call_transcripts (call_id, full_transcript, summary)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (call_id) DO UPDATE SET
+         full_transcript = EXCLUDED.full_transcript,
+         summary = EXCLUDED.summary`,
+      [call_id, transcript || '', summary || '']
+    );
+
     await client.query('COMMIT');
 
     // Post-commit: fire outcome-based notifications + usage tracking (best-effort)
@@ -408,7 +288,10 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
 
 // GET /v1/calls/:tenantId/summary — active call count from `calls` table (source of truth for live status)
 router.get('/calls/:tenantId/summary', asyncHandler(async (req, res) => {
-  const tenantId = String(req.params.tenantId || '').trim();
+  const tenantId = req.tenantId || String(req.params.tenantId || '').trim();
+  if (req.tenantId && req.params.tenantId && req.params.tenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Tenant mismatch' });
+  }
   const result = await db.query(
     `SELECT
        COUNT(*) FILTER (
@@ -430,7 +313,10 @@ router.get('/calls/:tenantId/summary', asyncHandler(async (req, res) => {
 // GET /v1/calls/:tenantId
 // List calls for a tenant (reads from calls table)
 router.get('/calls/:tenantId', asyncHandler(async (req, res) => {
-  const tenantId = String(req.params.tenantId || '').trim();
+  const tenantId = req.tenantId || String(req.params.tenantId || '').trim();
+  if (req.tenantId && req.params.tenantId && req.params.tenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Tenant mismatch' });
+  }
   const { limit = 50, status, lead_id: leadIdRaw } = req.query;
   const leadId = typeof leadIdRaw === 'string' ? leadIdRaw.trim() : leadIdRaw;
 

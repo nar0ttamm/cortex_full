@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth';
 import { getLeadsFromSupabase } from '@/lib/supabase-client';
 import { buildDashboardAnalytics } from '@/lib/analyticsFromLeads';
 import { DashboardStats, type DashboardAnalyticsPayload } from '@/types';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
 
 async function fetchCallsActiveCount(tenantId: string): Promise<number> {
   const base = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '';
@@ -15,6 +16,7 @@ async function fetchCallsActiveCount(tenantId: string): Promise<number> {
     const res = await fetch(`${base}/v1/calls/${encodeURIComponent(tenantId)}/summary`, {
       cache: 'no-store',
       signal: controller.signal,
+      headers: await getBackendAuthHeaders(),
     });
     clearTimeout(t);
     if (!res.ok) return 0;

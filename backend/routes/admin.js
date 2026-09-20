@@ -2,21 +2,11 @@ const { Router } = require('express');
 const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const { encryptCredentials } = require('../encryption');
-const config = require('../config');
+const { requireAdminToken } = require('../middleware/auth');
 
 const router = Router();
 
-// Simple admin token guard
-function requireAdminToken(req, res, next) {
-  if (!config.adminToken) return next(); // No token configured → open in dev
-  const token = req.headers['x-admin-token'] || req.headers['authorization']?.replace('Bearer ', '');
-  if (token !== config.adminToken) {
-    return res.status(401).json({ error: 'Unauthorized: invalid admin token' });
-  }
-  return next();
-}
-
-// GET /v1/tenant/:tenantId — fetch tenant profile (public, no auth needed)
+// GET /v1/tenant/:tenantId — session tenant only (requireUser already ran)
 router.get('/tenant/:tenantId', asyncHandler(async (req, res) => {
   const { tenantId } = req.params;
   const result = await db.query(

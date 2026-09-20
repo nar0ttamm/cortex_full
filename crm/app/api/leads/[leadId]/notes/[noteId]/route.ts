@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { getLeadFromSupabase } from '@/lib/supabase-client';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '';
 
@@ -21,7 +22,7 @@ export async function DELETE(
     }
     const res = await fetch(
       `${API_URL}/v1/leads/${encodeURIComponent(leadId)}/notes/${encodeURIComponent(noteId)}`,
-      { method: 'DELETE' }
+      { method: 'DELETE', headers: await getBackendAuthHeaders() }
     );
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));

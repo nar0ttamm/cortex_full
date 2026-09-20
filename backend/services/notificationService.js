@@ -14,10 +14,43 @@ function scheduledCallDelayPhrase() {
  * Send email via Resend API.
  * Credentials shape: { api_key, from_email }
  */
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function resolveServiceCredentials(tenantId, service) {
+  try {
+    return await getCredentials(tenantId, service);
+  } catch (err) {
+    if (service === 'resend' && process.env.RESEND_API_KEY) {
+      return {
+        api_key: process.env.RESEND_API_KEY,
+        from_email: process.env.RESEND_FROM_EMAIL || 'noreply@cortexflow.in',
+        reply_to_email: process.env.RESEND_REPLY_TO || null,
+      };
+    }
+    if (service === 'aisensy' && process.env.AISENSY_API_KEY) {
+      let campaigns = {};
+      try {
+        campaigns = JSON.parse(process.env.AISENSY_CAMPAIGNS || '{}');
+      } catch {
+        campaigns = {};
+      }
+      return { api_key: process.env.AISENSY_API_KEY, campaigns };
+    }
+    throw err;
+  }
+}
+
 async function sendEmail({ tenantId, to, subject, html }) {
   if (!to) return { skipped: true, reason: 'no recipient' };
 
-  const creds = await getCredentials(tenantId, 'resend');
+  const creds = await resolveServiceCredentials(tenantId, 'resend');
   const fromEmail  = creds.from_email   || 'noreply@cortexflow.ai';
   // reply_to_email routes replies through Resend Inbound so we can log them
   const replyTo    = creds.reply_to_email || null;
@@ -70,7 +103,7 @@ async function sendWhatsApp({ tenantId, to, campaignKey, templateParams = [], us
 
   let creds;
   try {
-    creds = await getCredentials(tenantId, 'aisensy');
+    creds = await resolveServiceCredentials(tenantId, 'aisensy');
   } catch {
     return { skipped: true, reason: 'aisensy not configured' };
   }
@@ -106,10 +139,10 @@ async function sendWhatsApp({ tenantId, to, campaignKey, templateParams = [], us
  * Failures are logged but do NOT throw — lead save is never blocked by notification errors.
  */
 async function sendLeadEntryNotifications({ tenantId, lead, adminEmail, adminPhone }) {
-  const leadName = lead.name || 'New Lead';
-  const leadPhone = lead.phone || '';
+  const leadName = escapeHtml(lead.name || 'New Lead');
+  const leadPhone = escapeHtml(lead.phone || '');
   const leadEmail = lead.email || null;
-  const leadInquiry = lead.inquiry || 'No details provided';
+  const leadInquiry = escapeHtml(lead.inquiry || 'No details provided');
   const delayPhrase = scheduledCallDelayPhrase();
 
   const adminEmailHtml = `
@@ -262,8 +295,8 @@ async function getAdminContact(tenantId) {
     const result = await db.query('SELECT settings FROM tenants WHERE id = $1', [tenantId]);
     const settings = result.rows[0]?.settings || {};
     return {
-      adminEmail: settings.admin_email || config.adminEmail,
-      adminPhone: settings.admin_phone || config.adminPhone,
+      adminEmail: settings.contact_email || settings.admin_email || config.adminEmail,
+      adminPhone: settings.whatsapp_number || settings.admin_phone || config.adminPhone,
     };
   } catch {
     return { adminEmail: config.adminEmail, adminPhone: config.adminPhone };
@@ -292,10 +325,10 @@ function fmtDate(iso) {
  */
 async function sendAppointmentBookedNotifications({ tenantId, lead, appointmentIso }) {
   const { adminEmail, adminPhone } = await getAdminContact(tenantId);
-  const leadName    = lead.name    || 'Lead';
-  const leadPhone   = lead.phone   || '';
+  const leadName    = escapeHtml(lead.name    || 'Lead');
+  const leadPhone   = escapeHtml(lead.phone   || '');
   const leadEmail   = lead.email   || null;
-  const dateLabel   = fmtDate(appointmentIso);
+  const dateLabel   = escapeHtml(fmtDate(appointmentIso));
 
   const adminWaBody = `📅 Appointment Booked!\nLead: ${leadName}\nPhone: ${leadPhone}\nDate & Time: ${dateLabel}\n\nBooked automatically via AI call.`;
 

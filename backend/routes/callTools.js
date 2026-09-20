@@ -10,19 +10,11 @@
 const { Router } = require('express');
 const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
-const config = require('../config');
+const { requireVoiceSecret } = require('../middleware/auth');
 const { searchProducts } = require('../services/productSelector');
 const { updateLeadMemory } = require('../services/leadIntentExtractor');
 
 const router = Router();
-
-function requireVoiceSecret(req, res, next) {
-  const secret = req.headers['x-voice-secret'];
-  if (config.voiceSecret && secret !== config.voiceSecret) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  return next();
-}
 
 // POST /v1/calls/tools/search-products
 // Agent calls this to find more products during a call.
@@ -200,13 +192,7 @@ router.post('/calls/tools/log-analytics', requireVoiceSecret, asyncHandler(async
 // Requires x-admin-token or x-voice-secret header.
 // Filters: tenant_id (required), project_id, from, to (ISO dates), limit
 // ─────────────────────────────────────────────────────────────────────────────
-// Analytics endpoints are tenant-scoped — no extra auth needed beyond tenant_id
-// (matches the existing pattern for all other tenant-scoped routes)
-function requireAnalyticsAuth(req, res, next) {
-  return next();
-}
-
-router.get('/calls/analytics', requireAnalyticsAuth, asyncHandler(async (req, res) => {
+router.get('/calls/analytics', asyncHandler(async (req, res) => {
   const { tenant_id, project_id, from, to, limit = 500 } = req.query;
 
   if (!tenant_id) {
@@ -282,7 +268,7 @@ router.get('/calls/analytics', requireAnalyticsAuth, asyncHandler(async (req, re
 }));
 
 // GET /v1/calls/usage/:tenantId — tenant usage summary for billing dashboard
-router.get('/calls/usage/:tenantId', requireAnalyticsAuth, asyncHandler(async (req, res) => {
+router.get('/calls/usage/:tenantId', asyncHandler(async (req, res) => {
   const { tenantId } = req.params;
   const { month } = req.query; // YYYY-MM-DD optional
 

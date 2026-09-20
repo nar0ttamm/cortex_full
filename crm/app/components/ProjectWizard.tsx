@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
 
 type Product = {
   id: string;
@@ -88,9 +89,11 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
       // Fetch teams
       fetch('/api/me')
         .then(r => r.ok ? r.json() : null)
-        .then(d => {
+        .then(async (d) => {
           if (d?.tenantId) {
-            return fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/teams?tenantId=${d.tenantId}`);
+            return fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/teams?tenantId=${d.tenantId}`, {
+              headers: await getBackendAuthHeaders(),
+            });
           }
         })
         .then(r => r?.ok ? r.json() : null)
@@ -139,7 +142,7 @@ export function ProjectWizard({ open, onClose, onCreated }: Props) {
 
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/projects`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getBackendAuthHeaders(),
         body: JSON.stringify(payload),
       });
 

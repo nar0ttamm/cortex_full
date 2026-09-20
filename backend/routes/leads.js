@@ -3,7 +3,8 @@ const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const config = require('../config');
 const { VALID_STATUSES, STATUS_TRANSITIONS, getLeadById, getLeadByPhone, mergeLeadMetadata } = require('../services/leadService');
-const { sendLeadEntryNotifications } = require('../services/notificationService');
+const { sendLeadEntryNotifications, getAdminContact } = require('../services/notificationService');
+const { enqueueCall } = require('../services/callQueueService');
 
 const router = Router();
 
@@ -50,12 +51,24 @@ router.post('/lead/ingest', asyncHandler(async (req, res) => {
 
   const lead = result.rows[0];
 
-  // Fire notifications (parallel, errors are logged but do not fail this request)
+  await enqueueCall({
+    tenantId: tenant_id,
+    projectId: lead.project_id || null,
+    leadId: lead.id,
+    priority: 5,
+    scheduledAt: scheduledCallAt,
+  }).catch((err) => console.warn('[ingest] enqueue failed:', err.message));
+
+  const admin = await getAdminContact(tenant_id).catch(() => ({
+    adminEmail: config.adminEmail,
+    adminPhone: config.adminPhone,
+  }));
+
   sendLeadEntryNotifications({
     tenantId: tenant_id,
     lead: { ...lead, inquiry, source, metadata: initialMetadata },
-    adminEmail: config.adminEmail,
-    adminPhone: config.adminPhone,
+    adminEmail: admin.adminEmail,
+    adminPhone: admin.adminPhone,
   }).catch((err) => console.error('[ingest] notification error:', err.message));
 
   return res.status(201).json({ status: 'created', lead });
@@ -63,7 +76,10 @@ router.post('/lead/ingest', asyncHandler(async (req, res) => {
 
 // GET /v1/leads/:tenantId
 router.get('/leads/:tenantId', asyncHandler(async (req, res) => {
-  const { tenantId } = req.params;
+  const tenantId = req.tenantId || req.params.tenantId;
+  if (req.tenantId && req.params.tenantId && req.params.tenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Tenant mismatch' });
+  }
   const { status, limit = 100 } = req.query;
 
   let query = 'SELECT * FROM leads WHERE tenant_id = $1';
@@ -83,7 +99,11 @@ router.get('/leads/:tenantId', asyncHandler(async (req, res) => {
 
 // GET /v1/leads/:tenantId/:leadId
 router.get('/leads/:tenantId/:leadId', asyncHandler(async (req, res) => {
-  const { tenantId, leadId } = req.params;
+  const tenantId = req.tenantId || req.params.tenantId;
+  const { leadId } = req.params;
+  if (req.tenantId && req.params.tenantId && req.params.tenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Tenant mismatch' });
+  }
   const result = await db.query(
     'SELECT * FROM leads WHERE tenant_id = $1 AND id = $2',
     [tenantId, leadId]
@@ -115,9 +135,12 @@ router.patch('/leads/:leadId', asyncHandler(async (req, res) => {
 
   updates.push('updated_at = NOW()');
   params.push(leadId);
+  const tenantFilter = req.tenantId;
+  const tenantClause = tenantFilter ? ` AND tenant_id = $${i + 1}` : '';
+  if (tenantFilter) params.push(tenantFilter);
 
   const result = await db.query(
-    `UPDATE leads SET ${updates.join(', ')} WHERE id = $${i} RETURNING *`,
+    `UPDATE leads SET ${updates.join(', ')} WHERE id = $${i}${tenantClause} RETURNING *`,
     params
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
@@ -174,8 +197,8 @@ router.post('/leads/:leadId/notes', asyncHandler(async (req, res) => {
        '{notes}',
        COALESCE(metadata->'notes', '[]'::jsonb) || $1::jsonb
      ), updated_at = NOW()
-     WHERE id = $2`,
-    [JSON.stringify([note]), leadId]
+     WHERE id = $2 AND tenant_id = COALESCE($3, tenant_id)`,
+    [JSON.stringify([note]), leadId, req.tenantId || null]
   );
   return res.json({ status: 'added', note });
 }));
@@ -183,12 +206,15 @@ router.post('/leads/:leadId/notes', asyncHandler(async (req, res) => {
 // DELETE /v1/leads/:leadId/notes/:noteId — remove a note
 router.delete('/leads/:leadId/notes/:noteId', asyncHandler(async (req, res) => {
   const { leadId, noteId } = req.params;
-  const lead = await db.query('SELECT metadata FROM leads WHERE id = $1', [leadId]);
+  const lead = await db.query(
+    'SELECT metadata FROM leads WHERE id = $1 AND tenant_id = COALESCE($2, tenant_id)',
+    [leadId, req.tenantId || null]
+  );
   if (lead.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
   const notes = (lead.rows[0].metadata?.notes || []).filter((n) => n.id !== noteId);
   await db.query(
-    `UPDATE leads SET metadata = jsonb_set(COALESCE(metadata,'{}'), '{notes}', $1::jsonb), updated_at = NOW() WHERE id = $2`,
-    [JSON.stringify(notes), leadId]
+    `UPDATE leads SET metadata = jsonb_set(COALESCE(metadata,'{}'), '{notes}', $1::jsonb), updated_at = NOW() WHERE id = $2 AND tenant_id = COALESCE($3, tenant_id)`,
+    [JSON.stringify(notes), leadId, req.tenantId || null]
   );
   return res.json({ status: 'deleted' });
 }));

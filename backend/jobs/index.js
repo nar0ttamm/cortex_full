@@ -3,29 +3,27 @@
  * Uses node-cron to run jobs on a schedule identical to Vercel Cron config.
  *
  * This file is only used when running `node server.js` locally.
- * In production (Vercel), cron jobs are triggered via HTTP by Vercel's cron infrastructure.
+ * In production the GCP Pipecat VM polls /v1/internal/queue-worker every minute.
  */
 
 const cron = require('node-cron');
-const { runCallScheduler } = require('./callScheduler');
 const { runReminderJob } = require('./reminderJob');
+const internal = require('../routes/internal');
 
 function startJobs() {
   console.log('⏱  Starting local cron jobs...');
 
-  // Every minute — call scheduler
   cron.schedule('* * * * *', async () => {
     try {
-      const result = await runCallScheduler();
-      if (result.processed > 0) {
-        console.log(`[cron] callScheduler: processed=${result.processed}, failed=${result.failed}`);
+      const result = await internal.runQueueWorker();
+      if (result.processed > 0 || result.errors) {
+        console.log(`[cron] queue-worker:`, result);
       }
     } catch (err) {
-      console.error('[cron] callScheduler error:', err.message);
+      console.error('[cron] queue-worker error:', err.message);
     }
   });
 
-  // Every hour — appointment reminders
   cron.schedule('0 * * * *', async () => {
     try {
       const result = await runReminderJob();
@@ -37,7 +35,7 @@ function startJobs() {
     }
   });
 
-  console.log('✓  Cron jobs scheduled (callScheduler: every minute, reminders: every hour)');
+  console.log('✓  Cron jobs scheduled (queue-worker: every minute, reminders: every hour)');
 }
 
 module.exports = { startJobs };

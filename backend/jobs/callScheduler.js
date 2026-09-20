@@ -61,6 +61,10 @@ async function processLeadCall(lead) {
     return;
   }
 
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') {
+    throw new Error('VOICE_SERVICE_URL is required in production — refusing simulated call');
+  }
+
   // No voice service configured → DB-only simulation (dev / pre-provisioning)
   await runSimulatedCall(lead);
 }

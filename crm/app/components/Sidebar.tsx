@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useNotifications } from '../contexts/NotificationContext';
 import { createClient } from '@/lib/supabase/client';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
 
 const NAV = [
   {
@@ -137,10 +138,17 @@ export function Sidebar({ collapsed, onToggle, onClose }: Props) {
 
   useEffect(() => {
     if (!tenantId || !process.env.NEXT_PUBLIC_API_URL) return;
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/tenant/${tenantId}`)
-      .then((r) => r.json())
-      .then((d) => setTenantName(d.tenant?.name || ''))
-      .catch(() => {});
+    void (async () => {
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/tenant/${tenantId}`, {
+          headers: await getBackendAuthHeaders(),
+        });
+        const d = await res.json();
+        setTenantName(d.tenant?.name || '');
+      } catch {
+        /* ignore */
+      }
+    })();
   }, [tenantId]);
 
   // Mark notifications seen when landing on /leads

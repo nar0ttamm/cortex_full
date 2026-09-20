@@ -114,6 +114,18 @@ async function processWebhookPayload({ tenantId, integrationKey, payload, skipSe
 
   const leadId = insertResult.rows[0].id;
 
+  try {
+    const { enqueueCall } = require('../services/callQueueService');
+    await enqueueCall({
+      tenantId,
+      leadId,
+      priority: 5,
+      scheduledAt: scheduledCallAt,
+    });
+  } catch (err) {
+    console.warn('[webhook] enqueue failed:', err.message);
+  }
+
   await logIntegrationEvent(tenantId, integrationKey, 'success', payload, leadId);
 
   // Fire notifications async (same as /v1/lead/ingest)

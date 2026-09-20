@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { getLeadFromSupabase } from '@/lib/supabase-client';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '';
 
@@ -26,7 +27,7 @@ export async function POST(
     }
     const res = await fetch(`${API_URL}/v1/leads/${encodeURIComponent(leadId)}/notes`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await getBackendAuthHeaders(),
       body: JSON.stringify({ text: text.trim(), author: body.author }),
     });
     const data = await res.json().catch(() => ({}));

@@ -11,31 +11,40 @@ const { Router } = require('express');
 const asyncHandler = require('../utils/asyncHandler');
 const config = require('../config');
 const db = require('../db');
-const { runCallScheduler } = require('../jobs/callScheduler');
 const { runReminderJob } = require('../jobs/reminderJob');
 const {
   getQueuedCalls,
   getActiveCalls,
-  hasCapacity,
   updateQueueStatus,
   scheduleRetry,
   canAttemptLead,
   MAX_CONCURRENT_CALLS,
 } = require('../services/callQueueService');
-const { buildCallContext } = require('../services/callContextBuilder');
-const { selectProducts } = require('../services/productSelector');
-const { extractAndStoreIntent } = require('../services/leadIntentExtractor');
-const { trackUsage } = require('../services/usageTracker');
+const { requireCronSecret } = require('../middleware/auth');
+const { startOutboundCall, StartCallError } = require('../services/startOutboundCall');
 
 const router = Router();
 
 function verifyCronSecret(req, res, next) {
-  if (!config.cronSecret) return next(); // Open in local dev
-  const authHeader = req.headers.authorization || '';
-  if (authHeader !== `Bearer ${config.cronSecret}`) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  return next();
+  return requireCronSecret(req, res, next);
+}
+
+async function migrateLegacyScheduledLeads() {
+  await db.query(
+    `INSERT INTO call_queue (tenant_id, project_id, lead_id, priority, scheduled_at, status)
+     SELECT l.tenant_id, l.project_id, l.id, 5,
+            COALESCE((l.metadata->>'scheduled_call_at')::timestamptz, NOW()),
+            'queued'
+     FROM leads l
+     WHERE COALESCE(l.metadata->>'call_initiated', 'false') NOT IN ('true', 'True')
+       AND l.status NOT IN ('not_interested', 'closed')
+       AND l.metadata->>'scheduled_call_at' IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM call_queue q
+         WHERE q.lead_id = l.id
+           AND q.status IN ('queued', 'retry_scheduled', 'processing', 'calling')
+       )`
+  ).catch((err) => console.warn('[queue-worker] legacy migrate skipped:', err.message));
 }
 
 // ─── V3 Queue Worker ──────────────────────────────────────────────────────────
@@ -51,6 +60,8 @@ async function runQueueWorker() {
   if (!config.voiceServiceUrl) {
     return { skipped: true, reason: 'VOICE_SERVICE_URL not configured' };
   }
+
+  await migrateLegacyScheduledLeads();
 
   const active = await getActiveCalls();
   if (active >= MAX_CONCURRENT_CALLS) {
@@ -113,68 +124,28 @@ async function runQueueWorker() {
     try {
       const tenantId = job.tenant_id;
       const leadId = job.lead_id;
-      const projectId = job.project_id || job.lead_project_id || null;
 
-      // Build call brief (best-effort — never block the call)
-      let call_brief = null;
       try {
-        await extractAndStoreIntent({
-          leadId, tenantId, projectId,
-          inquiry: job.inquiry || '',
-        }).catch(() => {});
-
-        const callContext = await buildCallContext({ tenantId, leadId });
-        let initial_products = [];
-        if (projectId) {
-          initial_products = await selectProducts({
-            projectId,
-            tenantId,
-            leadContext: { inquiry: job.inquiry || '' },
-          });
+        const result = await startOutboundCall({ tenantId, leadId });
+        await updateQueueStatus(job.id, 'calling', { callId: result.call_id });
+        processed++;
+      } catch (err) {
+        const message = err instanceof StartCallError ? err.message : err.message;
+        errors.push(`job ${job.id}: ${message}`);
+        if (err instanceof StartCallError && err.status === 409) {
+          skipped++;
+          continue;
         }
-        call_brief = { ...callContext, initial_products };
-      } catch {
-        // Non-critical — proceed without brief
+        const RETRIABLE = ['ECONNREFUSED', 'timeout', 'fetch failed', 'ETIMEDOUT', 'Voice service timeout'];
+        const isRetriable = RETRIABLE.some((e) => String(message).toLowerCase().includes(e.toLowerCase()));
+        if (isRetriable) {
+          await scheduleRetry(job.id, 30);
+        } else {
+          await updateQueueStatus(job.id, 'failed', { failureReason: message });
+        }
       }
-
-      // Track attempt
-      void trackUsage(tenantId, 'calls_attempted').catch(() => {});
-
-      const resp = await fetch(`${config.voiceServiceUrl}/voice/start-call`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-voice-secret': config.voiceSecret || '',
-        },
-        body: JSON.stringify({
-          tenant_id: tenantId,
-          lead_id: leadId,
-          phone: job.phone,
-          name: job.lead_name || '',
-          call_script: job.inquiry || undefined,
-          call_brief,
-        }),
-        signal: AbortSignal.timeout(25000),
-      });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${resp.status}`);
-      }
-
-      const result = await resp.json();
-      await updateQueueStatus(job.id, 'calling', { callId: result.call_id });
-      processed++;
     } catch (err) {
       errors.push(`job ${job.id}: ${err.message}`);
-      // Schedule retry if retriable failure
-      const RETRIABLE = ['ECONNREFUSED', 'timeout', 'fetch failed', 'ETIMEDOUT'];
-      const isRetriable = RETRIABLE.some((e) => err.message.toLowerCase().includes(e.toLowerCase()));
-      if (isRetriable) {
-        await scheduleRetry(job.id, 30); // retry in 30 min for transient errors
-      } else {
-        await updateQueueStatus(job.id, 'failed', { failureReason: err.message });
-      }
     }
   }
 
@@ -184,7 +155,7 @@ async function runQueueWorker() {
 // ─── Route handlers ───────────────────────────────────────────────────────────
 
 const processPendingCalls = asyncHandler(async (req, res) => {
-  const result = await runCallScheduler();
+  const result = await runQueueWorker();
   return res.json({ status: 'ok', ...result });
 });
 
@@ -211,3 +182,4 @@ router.get('/internal/queue-worker', verifyCronSecret, processQueueWorker);
 router.post('/internal/queue-worker', verifyCronSecret, processQueueWorker);
 
 module.exports = router;
+module.exports.runQueueWorker = runQueueWorker;

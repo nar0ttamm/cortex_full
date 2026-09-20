@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getSession } from '@/lib/auth';
 
 /**
  * POST /api/onboarding/complete
@@ -12,6 +13,11 @@ import { createClient } from '@supabase/supabase-js';
  */
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSession();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       userId,
@@ -26,13 +32,19 @@ export async function POST(req: NextRequest) {
       plan,
     } = body;
 
-    if (!userId || !fullName || !companyName || !email) {
+    if (!userId || userId !== session.user.id) {
+      return NextResponse.json({ error: 'User mismatch' }, { status: 403 });
+    }
+
+    if (!fullName || !companyName || !email) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Use service role key to write directly — bypasses RLS
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceKey) {
+      return NextResponse.json({ error: 'Server is missing SUPABASE_SERVICE_ROLE_KEY' }, { status: 503 });
+    }
 
     const supabase = createClient(supabaseUrl, serviceKey);
 

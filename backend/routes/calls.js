@@ -50,6 +50,9 @@ router.post('/call/event', asyncHandler(async (req, res) => {
 // POST /v1/call/simulate
 // Simulate an AI call without placing a real call (dev / pre-provisioning mode)
 router.post('/call/simulate', asyncHandler(async (req, res) => {
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') {
+    return res.status(403).json({ error: 'Simulated calls are disabled in production' });
+  }
   const { tenant_id, phone, lead_id } = req.body;
 
   if (!tenant_id || !phone) {

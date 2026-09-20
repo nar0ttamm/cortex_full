@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
 
 type UserProfile = {
   id: string;
@@ -66,7 +67,7 @@ function CreateUserModal({
     try {
       const res = await fetch(`${API}/v1/users/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getBackendAuthHeaders(),
         body: JSON.stringify({ tenantId, ...form }),
       });
       const data = await res.json();
@@ -150,9 +151,10 @@ export default function TeamPage() {
       const tid = me.tenantId;
       setTenantId(tid);
 
+      const headers = await getBackendAuthHeaders();
       const [usersRes, teamsRes] = await Promise.all([
-        fetch(`${API}/v1/users?tenantId=${tid}`),
-        fetch(`${API}/v1/teams?tenantId=${tid}`),
+        fetch(`${API}/v1/users?tenantId=${tid}`, { headers }),
+        fetch(`${API}/v1/teams?tenantId=${tid}`, { headers }),
       ]);
 
       if (usersRes.ok) setUsers((await usersRes.json()).users || []);

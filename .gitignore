@@ -15,6 +15,7 @@
 # ── Environment (never commit secrets) ───────────────────
 **/.env
 **/.env.local
+**/.env.prod
 **/.env.production
 **/.env.development
 **/.env.test
@@ -60,3 +61,7 @@ desktop.ini
 
 # ── Cursor (local IDE; may contain tokens) ────────────────
 .cursor/
+
+# ── Python ────────────────────────────────────────────────
+**/__pycache__/
+**/*.pyc

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
 
@@ -19,7 +20,7 @@ export async function POST(
 
     const res = await fetch(`${API_URL}/v1/notifications/send`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await getBackendAuthHeaders(),
       body: JSON.stringify({ tenant_id: tenantId, lead_id: leadId, type }),
     });
 

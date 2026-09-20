@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AppShell } from '../components/AppShell';
 
 import { useTenantId } from '@/app/hooks/useTenantId';
+import { getBackendAuthHeaders } from '@/lib/backendAuth';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -142,10 +143,11 @@ export default function IntegrationsPage() {
     }
     setLoading(true);
     try {
+      const headers = await getBackendAuthHeaders();
       const [sRes, cRes, lRes] = await Promise.all([
-        fetch(`${API_URL}/v1/integrations/supported`),
-        fetch(`${API_URL}/v1/integrations/${tenantId}`),
-        fetch(`${API_URL}/v1/integrations/${tenantId}/logs?limit=30`),
+        fetch(`${API_URL}/v1/integrations/supported`, { headers }),
+        fetch(`${API_URL}/v1/integrations/${tenantId}`, { headers }),
+        fetch(`${API_URL}/v1/integrations/${tenantId}/logs?limit=30`, { headers }),
       ]);
       if (sRes.ok) setSupported((await sRes.json()).integrations || []);
       if (cRes.ok) setConnected((await cRes.json()).integrations || []);
@@ -173,7 +175,7 @@ export default function IntegrationsPage() {
     try {
       const res = await fetch(`${API_URL}/v1/integrations/${tenantId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getBackendAuthHeaders(),
         body: JSON.stringify({ integration_key: key, label }),
       });
       if (res.ok) {
@@ -196,7 +198,10 @@ export default function IntegrationsPage() {
   const disconnect = async (key: string, label: string) => {
     if (!tenantId) return;
     if (!confirm(`Disconnect "${label}"? Leads from this source will stop being received.`)) return;
-    await fetch(`${API_URL}/v1/integrations/${tenantId}/${key}`, { method: 'DELETE' });
+    await fetch(`${API_URL}/v1/integrations/${tenantId}/${key}`, {
+      method: 'DELETE',
+      headers: await getBackendAuthHeaders(),
+    });
     await fetchData();
   };
 
@@ -204,7 +209,10 @@ export default function IntegrationsPage() {
     if (!tenantId) return;
     setTesting(key);
     try {
-      const res = await fetch(`${API_URL}/v1/integrations/${tenantId}/${key}/test`, { method: 'POST' });
+      const res = await fetch(`${API_URL}/v1/integrations/${tenantId}/${key}/test`, {
+        method: 'POST',
+        headers: await getBackendAuthHeaders(),
+      });
       const data = await res.json();
       const status = data.result?.status;
       setTestResult(prev => ({
@@ -223,7 +231,10 @@ export default function IntegrationsPage() {
 
   const regenerateSecret = async (key: string): Promise<string> => {
     if (!tenantId) return '';
-    const res = await fetch(`${API_URL}/v1/integrations/${tenantId}/${key}/regenerate-secret`, { method: 'POST' });
+    const res = await fetch(`${API_URL}/v1/integrations/${tenantId}/${key}/regenerate-secret`, {
+      method: 'POST',
+      headers: await getBackendAuthHeaders(),
+    });
     return (await res.json()).webhook_secret || '';
   };
 
