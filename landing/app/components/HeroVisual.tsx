@@ -1,23 +1,23 @@
 export function HeroVisual() {
   return (
-    <div className="relative mx-auto w-full max-w-[540px]">
-      <div className="absolute -left-4 top-8 hidden items-center gap-2 rounded-2xl border border-[var(--border)] bg-white px-3 py-2 shadow-[var(--shadow-md)] sm:flex">
+    <div className="relative mx-auto w-full max-w-[540px] px-1 pt-16 pb-14 sm:px-4">
+      <div className="absolute left-1 top-0 z-20 hidden max-w-[min(100%,240px)] items-center gap-2 rounded-2xl border border-[var(--border)] bg-white px-3 py-2 shadow-[var(--shadow-md)] sm:flex">
         <img
           src="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=80&h=80&q=80"
           alt=""
-          className="h-8 w-8 rounded-full object-cover"
+          className="h-8 w-8 shrink-0 rounded-full object-cover"
         />
-        <div>
+        <div className="min-w-0">
           <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--teal)]">Live call</p>
-          <p className="text-sm font-semibold">Vikram Iyer · Pune</p>
+          <p className="truncate text-sm font-semibold">Vikram Iyer · Pune</p>
         </div>
       </div>
-      <div className="absolute -right-2 bottom-16 hidden rounded-2xl border border-[var(--border)] bg-white px-3 py-2 shadow-[var(--shadow-md)] sm:block">
+      <div className="absolute bottom-0 right-1 z-20 hidden max-w-[min(100%,220px)] rounded-2xl border border-[var(--border)] bg-white px-3 py-2 shadow-[var(--shadow-md)] sm:block">
         <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent)]">Booked</p>
         <p className="text-sm font-semibold">Site visit · 4:30 pm</p>
       </div>
 
-      <div className="surface-card overflow-hidden p-4 md:p-5">
+      <div className="surface-card relative z-10 overflow-hidden p-4 md:p-5">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--fg-muted)]">Today&apos;s floor</p>
