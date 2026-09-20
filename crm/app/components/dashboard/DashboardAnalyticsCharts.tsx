@@ -1,38 +1,90 @@
 'use client';
 
 import { useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { toPng } from 'html-to-image';
 import type { DashboardAnalyticsPayload } from '@/types';
 
-function BarChart({ data }: { data: { label: string; value: number; color: string }[] }) {
+const STATUS_HREF: Record<string, string> = {
+  New: '/leads?status=new',
+  Interested: '/leads?status=interested',
+  Scheduled: '/leads?status=appointment_scheduled',
+  Confirmed: '/leads?status=confirmed',
+  'Not Interested': '/leads?status=not_interested',
+  Closed: '/leads?status=closed',
+};
+
+const FUNNEL_HREF: Record<string, string> = {
+  'Total Leads': '/leads',
+  Called: '/calls',
+  Interested: '/leads?status=interested',
+  'Appt Scheduled': '/appointments',
+  Confirmed: '/leads?status=confirmed',
+};
+
+const CALL_HREF: Record<string, string> = {
+  Done: '/calls',
+  Pending: '/calls',
+  Failed: '/calls',
+};
+
+function BarChart({
+  data,
+  hrefFor,
+}: {
+  data: { label: string; value: number; color: string }[];
+  hrefFor?: (label: string) => string | undefined;
+}) {
   const max = Math.max(...data.map((d) => d.value), 1);
   return (
     <div className="flex items-end gap-1.5 sm:gap-2 h-36 pt-2">
-      {data.map((d, i) => (
-        <div key={i} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-          <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">{d.value}</span>
-          <div
-            className="w-full rounded-t-lg transition-all duration-500 ease-out"
-            style={{
-              height: `${Math.max((d.value / max) * 100, 4)}%`,
-              backgroundColor: d.color,
-              minHeight: d.value ? '4px' : '2px',
-              opacity: d.value ? 1 : 0.3,
-            }}
-          />
-          <span
-            className="text-[9px] text-slate-400 text-center leading-tight line-clamp-2"
-            style={{ wordBreak: 'break-word' }}
+      {data.map((d, i) => {
+        const href = hrefFor?.(d.label);
+        const inner = (
+          <>
+            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">{d.value}</span>
+            <div
+              className="w-full rounded-t-lg transition-all duration-500 ease-out"
+              style={{
+                height: `${Math.max((d.value / max) * 100, 4)}%`,
+                backgroundColor: d.color,
+                minHeight: d.value ? '4px' : '2px',
+                opacity: d.value ? 1 : 0.3,
+              }}
+            />
+            <span
+              className="text-[9px] text-slate-400 text-center leading-tight line-clamp-2"
+              style={{ wordBreak: 'break-word' }}
+            >
+              {d.label}
+            </span>
+          </>
+        );
+        return href ? (
+          <Link
+            key={i}
+            href={href}
+            className="flex-1 flex flex-col items-center gap-1.5 min-w-0 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
           >
-            {d.label}
-          </span>
-        </div>
-      ))}
+            {inner}
+          </Link>
+        ) : (
+          <div key={i} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+            {inner}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function DonutChart({ data }: { data: { label: string; value: number; color: string }[] }) {
+function DonutChart({
+  data,
+  hrefFor,
+}: {
+  data: { label: string; value: number; color: string }[];
+  hrefFor?: (label: string) => string | undefined;
+}) {
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
   let offset = 0;
   const r = 36;
@@ -68,19 +120,37 @@ function DonutChart({ data }: { data: { label: string; value: number; color: str
         </div>
       </div>
       <div className="space-y-1.5 min-w-0 w-full sm:flex-1">
-        {data.map((d, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
-            <span className="text-xs text-slate-600 dark:text-slate-300 truncate">{d.label}</span>
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 ml-auto">{d.value}</span>
-          </div>
-        ))}
+        {data.map((d, i) => {
+          const href = hrefFor?.(d.label);
+          const row = (
+            <>
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
+              <span className="text-xs text-slate-600 dark:text-slate-300 truncate">{d.label}</span>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 ml-auto">{d.value}</span>
+            </>
+          );
+          return href ? (
+            <Link key={i} href={href} className="flex items-center gap-2 rounded-lg px-1 py-0.5 -mx-1 hover:bg-slate-50 dark:hover:bg-slate-800/60">
+              {row}
+            </Link>
+          ) : (
+            <div key={i} className="flex items-center gap-2">
+              {row}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function Funnel({ steps }: { steps: { label: string; value: number; color: string }[] }) {
+function Funnel({
+  steps,
+  hrefFor,
+}: {
+  steps: { label: string; value: number; color: string }[];
+  hrefFor?: (label: string) => string | undefined;
+}) {
   const max = steps[0]?.value || 1;
   return (
     <div className="space-y-2">
@@ -88,8 +158,9 @@ function Funnel({ steps }: { steps: { label: string; value: number; color: strin
         const pct = Math.round((s.value / max) * 100);
         const convRate =
           i > 0 && steps[i - 1].value > 0 ? Math.round((s.value / steps[i - 1].value) * 100) : null;
-        return (
-          <div key={i}>
+        const href = hrefFor?.(s.label);
+        const body = (
+          <>
             <div className="flex items-center justify-between mb-1 gap-2">
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{s.label}</span>
               <div className="flex items-center gap-2 shrink-0">
@@ -105,7 +176,14 @@ function Funnel({ steps }: { steps: { label: string; value: number; color: strin
                 style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: s.color }}
               />
             </div>
-          </div>
+          </>
+        );
+        return href ? (
+          <Link key={i} href={href} className="block rounded-lg hover:opacity-90">
+            {body}
+          </Link>
+        ) : (
+          <div key={i}>{body}</div>
         );
       })}
     </div>
@@ -117,21 +195,33 @@ function StatCard({
   value,
   sub,
   color,
+  href,
 }: {
   label: string;
   value: number | string;
   sub?: string;
   color: string;
+  href?: string;
 }) {
-  return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm p-4 sm:p-5">
+  const inner = (
+    <>
       <p className="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{label}</p>
       <p className="text-2xl sm:text-3xl font-bold break-words" style={{ color }}>
         {value}
       </p>
       {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
-    </div>
+    </>
   );
+  const cls =
+    'bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm p-4 sm:p-5';
+  if (href) {
+    return (
+      <Link href={href} className={`${cls} block hover:border-[var(--accent)]/40 hover:shadow-md transition-all`}>
+        {inner}
+      </Link>
+    );
+  }
+  return <div className={cls}>{inner}</div>;
 }
 
 function ChartCard({ title, children, chartId }: { title: string; children: React.ReactNode; chartId: string }) {
@@ -151,9 +241,17 @@ function ChartCard({ title, children, chartId }: { title: string; children: Reac
 
 type Props = {
   analytics: DashboardAnalyticsPayload | null;
+  newLeads?: number;
+  activeCalls?: number;
+  appointmentsToday?: number;
 };
 
-export function DashboardAnalyticsCharts({ analytics }: Props) {
+export function DashboardAnalyticsCharts({
+  analytics,
+  newLeads = 0,
+  activeCalls = 0,
+  appointmentsToday = 0,
+}: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const exportChartPng = useCallback((chartId: string, name: string) => {
@@ -241,45 +339,57 @@ export function DashboardAnalyticsCharts({ analytics }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total Leads" value={k.total} color="#e24b1b" />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <StatCard href="/leads" label="Total Leads" value={k.total} color="#e24b1b" />
+        <StatCard href="/leads?status=new" label="New" value={newLeads} color="#1a6b63" />
         <StatCard
+          href="/leads?status=interested"
           label="Interested"
           value={k.interested}
           sub={`${k.total > 0 ? Math.round((k.interested / k.total) * 100) : 0}% of total`}
           color="#1a6b63"
         />
-        <StatCard label="Confirmed" value={k.converted} color="#c4841d" />
-        <StatCard label="Conversion Rate" value={`${k.conversionRate}%`} sub="New → Confirmed" color="#e24b1b" />
+        <StatCard href="/calls" label="Active Calls" value={activeCalls} color="#7c3aed" />
+        <StatCard href="/appointments" label="Appts Today" value={appointmentsToday} color="#db2777" />
+        <StatCard
+          href="/leads?status=confirmed"
+          label="Conversion"
+          value={`${k.conversionRate}%`}
+          sub="New → Confirmed"
+          color="#e24b1b"
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <ChartCard title="Leads — Last 7 Days" chartId="chart-trend">
-          <BarChart data={analytics.trend} />
+          <BarChart data={analytics.trend} hrefFor={() => '/leads'} />
         </ChartCard>
         <ChartCard title="Conversion Funnel" chartId="chart-funnel">
-          <Funnel steps={analytics.funnel} />
+          <Funnel steps={analytics.funnel} hrefFor={(label) => FUNNEL_HREF[label]} />
         </ChartCard>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
         <ChartCard title="Lead Status" chartId="chart-status">
           {analytics.statusChart.length > 0 ? (
-            <DonutChart data={analytics.statusChart} />
+            <DonutChart data={analytics.statusChart} hrefFor={(label) => STATUS_HREF[label]} />
           ) : (
             <p className="text-xs text-slate-400 py-4 text-center">No data</p>
           )}
         </ChartCard>
         <ChartCard title="Lead Sources" chartId="chart-sources">
           {analytics.sourceChart.length > 0 ? (
-            <BarChart data={analytics.sourceChart} />
+            <BarChart
+              data={analytics.sourceChart}
+              hrefFor={(label) => `/leads?source=${encodeURIComponent(label)}`}
+            />
           ) : (
             <p className="text-xs text-slate-400 py-4 text-center">No data</p>
           )}
         </ChartCard>
         <ChartCard title="AI Call Outcomes (lead metadata)" chartId="chart-calls">
           {analytics.callChart.length > 0 ? (
-            <DonutChart data={analytics.callChart} />
+            <DonutChart data={analytics.callChart} hrefFor={(label) => CALL_HREF[label]} />
           ) : (
             <p className="text-xs text-slate-400 py-4 text-center">No call metadata yet</p>
           )}

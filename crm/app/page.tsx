@@ -6,24 +6,6 @@ import { AppShell } from './components/AppShell';
 import { DashboardStats as DashboardStatsType, RecentActivity, DashboardAnalyticsPayload } from '@/types';
 import { DashboardAnalyticsCharts } from './components/dashboard/DashboardAnalyticsCharts';
 
-const STAT_CONFIGS = [
-  { key: 'totalLeads',            label: 'Total Leads',            icon: '👥', color: 'bg-sky-500',     showNew: true  },
-  { key: 'newLeads',              label: 'New Leads',              icon: '✨', color: 'bg-cyan-500',    showNew: false },
-  { key: 'interestedLeads',       label: 'Interested',             icon: '✅', color: 'bg-teal-500',    showNew: false },
-  { key: 'notInterestedLeads',    label: 'Not Interested',         icon: '✕',  color: 'bg-slate-500',   showNew: false },
-  { key: 'activeCalls',           label: 'Active Calls',           icon: '📞', color: 'bg-violet-500',  showNew: false },
-  { key: 'appointmentsToday',     label: 'Appts Today',            icon: '📅', color: 'bg-pink-500',    showNew: false },
-  { key: 'confirmedAppointments', label: 'Confirmed Appts',        icon: '✓',  color: 'bg-emerald-500', showNew: false },
-  { key: 'conversionRate',        label: 'Conversion Rate',        icon: '📈', color: 'bg-orange-500',  showNew: false },
-] as const;
-
-type StatKey = typeof STAT_CONFIGS[number]['key'];
-
-function getStatValue(stats: DashboardStatsType, key: StatKey): string | number {
-  if (key === 'conversionRate') return `${stats.conversionRate}%`;
-  return stats[key as keyof DashboardStatsType] as number;
-}
-
 function formatTimeAgo(timestamp: string): string {
   const d = new Date(timestamp);
   if (isNaN(d.getTime())) return '';
@@ -66,7 +48,6 @@ export default function DashboardPage() {
         const data = await statsRes.json().catch(() => ({}));
         const msg = data.error || 'Failed to load stats';
 
-        // Auto-retry once on transient backend errors (cold starts, timeouts)
         if (attempt === 1 && statsRes.status === 500) {
           setTimeout(() => fetchAll(isRefresh, 2), 2500);
           return;
@@ -101,7 +82,6 @@ export default function DashboardPage() {
         document.getElementById('dashboard-analytics')?.scrollIntoView({ behavior: 'smooth' });
       });
     }
-    // Show first-project prompt after fresh onboarding
     if (url.searchParams.get('onboarding') === 'complete') {
       setShowProjectPrompt(true);
     }
@@ -172,7 +152,6 @@ export default function DashboardPage() {
     <AppShell title="Dashboard" actions={actions}>
       <div className="p-4 sm:p-6 lg:p-8 space-y-8">
 
-        {/* First-project onboarding prompt */}
         {showProjectPrompt && (
           <div className="relative overflow-hidden rounded-2xl border border-teal-200/60 dark:border-teal-800/40 bg-gradient-to-r from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 p-5 flex items-center gap-5">
             <div className="w-12 h-12 rounded-xl bg-teal-500 flex items-center justify-center shrink-0 shadow-md">
@@ -198,63 +177,23 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* KPI strip — unified with insights below */}
-        <section aria-label="Key metrics">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              <span className="w-1 h-5 bg-gradient-to-b from-teal-500 to-cyan-500 rounded-full" />
-              Overview
-            </h2>
-            <span className="text-[11px] text-slate-400 dark:text-slate-500 hidden sm:inline">Live from your workspace</span>
-          </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-          {STAT_CONFIGS.map((cfg) => (
-            <div
-              key={cfg.key}
-              className="bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200/80 dark:border-slate-700 p-4 shadow-sm hover:shadow-md hover:border-teal-200/60 dark:hover:border-teal-800/50 transition-all"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className={`w-9 h-9 rounded-xl ${cfg.color} flex items-center justify-center shadow-sm`}>
-                  {cfg.icon === '✕' ? (
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  ) : cfg.icon === '✓' ? (
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <span className="text-base leading-none">{cfg.icon}</span>
-                  )}
-                </div>
-              </div>
-              <p className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-slate-100 tracking-tight">
-                {getStatValue(stats, cfg.key)}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">{cfg.label}</p>
-              {cfg.showNew && stats.newLeads > 0 && (
-                <span className="inline-flex mt-2 px-2 py-0.5 bg-emerald-50 text-emerald-600 text-xs font-semibold rounded-full border border-emerald-100">
-                  +{stats.newLeads} new
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-        </section>
+        <DashboardAnalyticsCharts
+          analytics={analytics}
+          newLeads={stats.newLeads}
+          activeCalls={stats.activeCalls}
+          appointmentsToday={stats.appointmentsToday}
+        />
 
-        <DashboardAnalyticsCharts analytics={analytics} />
-
-        {/* Bottom row */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-
-          {/* Recent Activity */}
           <div className="lg:col-span-3 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
               <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 <span className="w-1 h-4 bg-teal-500 rounded-full" />
                 Recent Activity
               </h2>
-              <span className="text-xs text-slate-400 font-medium">{activities.length} events</span>
+              <Link href="/leads" className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:underline">
+                {activities.length} events
+              </Link>
             </div>
             {activities.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center px-4">
@@ -264,7 +203,9 @@ export default function DashboardPage() {
                   </svg>
                 </div>
                 <p className="text-sm text-slate-500 font-medium">No recent activity</p>
-                <p className="text-xs text-slate-400 mt-1">Activity will appear as leads come in</p>
+                <Link href="/data" className="text-xs text-teal-600 font-semibold mt-2 hover:underline">
+                  Add a lead to get started
+                </Link>
               </div>
             ) : (
               <ul className="divide-y divide-slate-50 dark:divide-slate-700/80">
@@ -304,7 +245,6 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Quick Actions */}
           <div className="lg:col-span-2 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700">
               <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
@@ -316,6 +256,7 @@ export default function DashboardPage() {
               {[
                 { href: '/leads', icon: '👥', label: 'View All Leads', sub: 'Browse and manage pipeline', color: 'bg-[var(--bg)] border-[var(--border)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent)]/30' },
                 { href: '/data', icon: '➕', label: 'Add / Import Leads', sub: 'Manual or CSV bulk import', color: 'bg-[var(--bg)] border-[var(--border)] hover:bg-[var(--teal-soft)] hover:border-[var(--teal)]/30' },
+                { href: '/calls', icon: '📞', label: 'Calls', sub: 'Live and completed AI calls', color: 'bg-[var(--bg)] border-[var(--border)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent)]/30' },
                 { href: '/appointments', icon: '📅', label: 'Appointments Calendar', sub: 'View scheduled appointments', color: 'bg-[var(--bg)] border-[var(--border)] hover:bg-[var(--gold-soft)] hover:border-[var(--gold)]/30' },
                 { href: '/communications', icon: '💬', label: 'Communications', sub: 'View messages & call logs', color: 'bg-[var(--bg)] border-[var(--border)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent)]/30' },
               ].map((item) => (
@@ -336,7 +277,6 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
-
         </div>
       </div>
     </AppShell>

@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { AppShell } from '../components/AppShell';
 import { Lead } from '@/types';
 import { ScheduledCallCountdown } from '@/components/ScheduledCallCountdown';
@@ -23,18 +24,29 @@ function normalizeKanbanStatus(s: string) {
   return found ? found.id : 'new';
 }
 
-export default function LeadsPage() {
+function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [filteredLeads, setFilteredLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const searchParams = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [dragLeadId, setDragLeadId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
   const dragRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const status = searchParams.get('status');
+    const source = searchParams.get('source');
+    const q = searchParams.get('q');
+    if (status) setStatusFilter(status);
+    if (source) setSourceFilter(source);
+    if (q) setSearchTerm(q);
+  }, [searchParams]);
 
   const fetchLeads = useCallback(async (silent = false) => {
     try {
@@ -90,7 +102,7 @@ export default function LeadsPage() {
 
   useEffect(() => {
     filterLeads();
-  }, [leads, searchTerm, statusFilter]);
+  }, [leads, searchTerm, statusFilter, sourceFilter]);
 
   const filterLeads = () => {
     let filtered = [...leads];
@@ -106,7 +118,13 @@ export default function LeadsPage() {
     }
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter((lead) => lead.status === statusFilter);
+      filtered = filtered.filter(
+        (lead) => (lead.status || '').toLowerCase() === statusFilter.toLowerCase()
+      );
+    }
+
+    if (sourceFilter !== 'all') {
+      filtered = filtered.filter((lead) => (lead.source || '') === sourceFilter);
     }
 
     setFilteredLeads(filtered);
@@ -161,7 +179,13 @@ export default function LeadsPage() {
     return 'text-slate-600';
   };
 
-  const uniqueStatuses = Array.from(new Set(leads.map((l) => l.status).filter(Boolean)));
+  const uniqueStatuses = Array.from(
+    new Set(
+      [...leads.map((l) => l.status).filter(Boolean), statusFilter !== 'all' ? statusFilter : null].filter(
+        Boolean
+      ) as string[]
+    )
+  );
 
   // Don't show full-screen loading - keep header visible
 
@@ -331,7 +355,7 @@ export default function LeadsPage() {
         ) : filteredLeads.length === 0 ? (
           <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 p-14 text-center">
             <p className="text-slate-400 text-sm font-medium">No leads found</p>
-            {(searchTerm || statusFilter !== 'all') && (
+            {(searchTerm || statusFilter !== 'all' || sourceFilter !== 'all') && (
               <p className="text-slate-400 text-xs mt-1">Try adjusting your filters</p>
             )}
           </div>
@@ -453,5 +477,21 @@ export default function LeadsPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+export default function LeadsPageWithParams() {
+  return (
+    <Suspense
+      fallback={
+        <AppShell title="Leads">
+          <div className="flex items-center justify-center h-64">
+            <div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        </AppShell>
+      }
+    >
+      <LeadsPage />
+    </Suspense>
   );
 }
