@@ -1,8 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { AppShell } from '../components/AppShell';
 import { getBackendAuthHeaders } from '@/lib/backendAuth';
+
+type TeamRef = { id: string; name: string };
 
 type UserProfile = {
   id: string;
@@ -13,8 +16,8 @@ type UserProfile = {
   role: 'admin' | 'manager' | 'executive';
   position?: string;
   is_active: boolean;
+  teams?: TeamRef[];
   team_name?: string;
-  team_id?: string;
   created_at: string;
 };
 
@@ -22,112 +25,60 @@ type Team = {
   id: string;
   name: string;
   manager_name?: string;
+  manager_id?: string;
   member_count: number;
+  project_count?: number;
   description?: string;
   created_at: string;
 };
 
+type TeamDetail = {
+  team: Team;
+  members: Array<{
+    user_profile_id: string;
+    full_name: string;
+    email: string;
+    role: string;
+    workspace_role?: string;
+    position?: string;
+    is_active: boolean;
+  }>;
+  projects: Array<{ id: string; name: string; status: string }>;
+};
+
 const ROLE_COLORS: Record<string, string> = {
-  admin: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  manager: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  executive: 'bg-slate-700/50 text-slate-400 border-slate-600',
+  admin: 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/20',
+  manager: 'bg-[var(--teal-soft)] text-[var(--teal)] border-[var(--border)]',
+  executive: 'bg-[var(--bg-warm)] text-[var(--fg-muted)] border-[var(--border)]',
 };
 
-const ROLE_LABELS: Record<string, string> = {
-  admin: 'Admin',
-  manager: 'Manager',
-  executive: 'Executive',
+const ROLE_HELP: Record<string, string> = {
+  admin: 'Full workspace access',
+  manager: 'Can run a team and create projects',
+  executive: 'Works assigned leads and calls',
 };
 
-function CreateUserModal({
-  open, onClose, onCreated, tenantId, teams,
+function Modal({
+  open, title, subtitle, onClose, children,
 }: {
-  open: boolean; onClose: () => void; onCreated: () => void;
-  tenantId: string; teams: Team[];
+  open: boolean; title: string; subtitle?: string; onClose: () => void; children: React.ReactNode;
 }) {
-  const [form, setForm] = useState({
-    fullName: '', email: '', password: '', phone: '',
-    role: 'executive', position: '', teamId: '',
-  });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const API = process.env.NEXT_PUBLIC_API_URL || '';
-
   if (!open) return null;
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.fullName || !form.email || !form.password) {
-      setError('Name, email and password are required');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`${API}/v1/users/create`, {
-        method: 'POST',
-        headers: await getBackendAuthHeaders(),
-        body: JSON.stringify({ tenantId, ...form }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create user');
-      onCreated();
-      onClose();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error');
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <div className="w-full max-w-md cf-card p-6 shadow-[var(--shadow-lg)]">
-        <h3 className="font-serif text-2xl text-[var(--fg)] mb-5">Add team member</h3>
-        {error && <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 rounded-lg text-red-700 dark:text-red-300 text-sm">{error}</div>}
-        <form onSubmit={handleSubmit} className="space-y-3">
-          {[
-            { label: 'Full Name *', field: 'fullName', type: 'text', placeholder: 'Your name' },
-            { label: 'Email *', field: 'email', type: 'email', placeholder: 'you@company.com' },
-            { label: 'Password *', field: 'password', type: 'password', placeholder: '••••••••' },
-            { label: 'Phone', field: 'phone', type: 'tel', placeholder: '+91 98765 43210' },
-            { label: 'Position / Role', field: 'position', type: 'text', placeholder: 'Sales Executive' },
-          ].map(({ label, field, type, placeholder }) => (
-            <div key={field}>
-              <label className="block text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-[0.14em] mb-1">{label}</label>
-              <input
-                type={type}
-                value={(form as any)[field]}
-                onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
-                placeholder={placeholder}
-                className="cf-input !rounded-lg !px-3 !py-2.5"
-              />
-            </div>
-          ))}
+        <div className="mb-5 flex items-start justify-between gap-3">
           <div>
-            <label className="block text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-[0.14em] mb-1">Role *</label>
-            <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} className="cf-input !rounded-lg !px-3 !py-2.5">
-              <option value="manager">Manager</option>
-              <option value="executive">Executive</option>
-            </select>
+            <h3 className="font-serif text-2xl text-[var(--fg)]">{title}</h3>
+            {subtitle && <p className="mt-1 text-xs text-[var(--fg-muted)]">{subtitle}</p>}
           </div>
-          {teams.length > 0 && (
-            <div>
-              <label className="block text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-[0.14em] mb-1">Assign to Team</label>
-              <select value={form.teamId} onChange={e => setForm(f => ({ ...f, teamId: e.target.value }))} className="cf-input !rounded-lg !px-3 !py-2.5">
-                <option value="">No team yet</option>
-                {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
-          )}
-          <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="cf-btn-secondary flex-1">Cancel</button>
-            <button type="submit" disabled={loading} className="cf-btn-primary flex-[2]">
-              {loading ? 'Adding…' : 'Add member'}
-            </button>
-          </div>
-        </form>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-[var(--fg-muted)] hover:bg-[var(--bg-warm)]">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        {children}
       </div>
     </div>
   );
@@ -139,7 +90,12 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [tenantId, setTenantId] = useState('');
   const [showCreateUser, setShowCreateUser] = useState(false);
-  const [activeTab, setActiveTab] = useState<'members' | 'teams'>('members');
+  const [showCreateTeam, setShowCreateTeam] = useState(false);
+  const [activeTab, setActiveTab] = useState<'people' | 'teams'>('teams');
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<TeamDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const API = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -168,114 +124,534 @@ export default function TeamPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const loadDetail = useCallback(async (teamId: string) => {
+    if (!tenantId) return;
+    setDetailLoading(true);
+    try {
+      const res = await fetch(`${API}/v1/teams/${teamId}?tenantId=${tenantId}`, {
+        headers: await getBackendAuthHeaders(),
+      });
+      if (!res.ok) throw new Error('Could not load team');
+      setDetail(await res.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load team');
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [API, tenantId]);
+
+  useEffect(() => {
+    if (selectedTeamId) loadDetail(selectedTeamId);
+    else setDetail(null);
+  }, [selectedTeamId, loadDetail]);
+
+  const unassignedPeople = useMemo(() => {
+    if (!detail) return users;
+    const onTeam = new Set(detail.members.map((m) => m.user_profile_id));
+    return users.filter((u) => !onTeam.has(u.id));
+  }, [users, detail]);
+
   const actions = (
-    <button
-      onClick={() => setShowCreateUser(true)}
-      className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 rounded-lg text-xs font-semibold transition-colors border border-teal-500/20"
-    >
-      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-      </svg>
-      Add Member
-    </button>
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => setShowCreateTeam(true)}
+        className="hidden sm:flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-semibold text-[var(--fg)] hover:border-[var(--accent)]/40"
+      >
+        New team
+      </button>
+      <button
+        onClick={() => setShowCreateUser(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--accent-soft)] text-[var(--accent)] rounded-lg text-xs font-semibold border border-[var(--accent)]/20 hover:bg-[var(--accent)] hover:text-white transition-colors"
+      >
+        Add person
+      </button>
+    </div>
   );
 
   return (
     <AppShell title="Team" actions={actions}>
-      <div className="p-4 sm:p-6 max-w-5xl mx-auto">
-        {/* Tabs */}
-        <div className="flex gap-1 p-1 bg-slate-100 dark:bg-slate-800/60 rounded-xl w-fit mb-6">
-          {(['members', 'teams'] as const).map(tab => (
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
+        <div className="cf-card p-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--fg-muted)]">How this works</p>
+          <h2 className="mt-1 font-serif text-xl text-[var(--fg)]">Workspace → team → people → project</h2>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--fg-muted)]">
+            A <span className="font-semibold text-[var(--fg)]">team</span> is the sales group that owns campaigns.
+            Add people to a team, then assign that team when you create a project. Workspace roles (admin / manager / executive) control permissions; team membership controls who works which campaigns.
+          </p>
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5">
+              <p className="font-semibold text-[var(--fg)]">1. Create a team</p>
+              <p className="mt-0.5 text-[var(--fg-muted)]">e.g. Mumbai sales</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5">
+              <p className="font-semibold text-[var(--fg)]">2. Add people</p>
+              <p className="mt-0.5 text-[var(--fg-muted)]">They get a login for this workspace</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5">
+              <p className="font-semibold text-[var(--fg)]">3. Assign a project</p>
+              <p className="mt-0.5 text-[var(--fg-muted)]">
+                From <Link href="/projects" className="text-[var(--accent)] font-semibold">Projects</Link>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        )}
+
+        <div className="flex gap-1 p-1 bg-slate-100 dark:bg-slate-800/60 rounded-xl w-fit">
+          {([
+            { id: 'teams', label: `Teams (${teams.length})` },
+            { id: 'people', label: `People (${users.length})` },
+          ] as const).map((tab) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-all ${
-                activeTab === tab
+              key={tab.id}
+              onClick={() => { setActiveTab(tab.id); setSelectedTeamId(null); }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === tab.id
                   ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-sm'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
               }`}
             >
-              {tab === 'members' ? `Members (${users.length})` : `Teams (${teams.length})`}
+              {tab.label}
             </button>
           ))}
         </div>
 
         {loading ? (
           <div className="flex justify-center py-16">
-            <div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-8 h-8 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : activeTab === 'members' ? (
-          <div className="space-y-2">
-            {users.length === 0 ? (
-              <div className="text-center py-16 text-slate-400">
-                <svg className="w-12 h-12 mx-auto mb-3 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
-                </svg>
-                <p className="text-sm">No team members yet.</p>
-                <button onClick={() => setShowCreateUser(true)} className="mt-3 text-teal-400 text-sm hover:underline">Add your first member →</button>
-              </div>
-            ) : (
-              users.map(user => (
-                <div key={user.id} className="flex items-center gap-4 p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/70 dark:border-slate-800 hover:border-teal-500/30 transition-all">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-400/20 to-cyan-500/20 flex items-center justify-center shrink-0">
-                    <span className="text-teal-400 font-bold text-sm">{user.full_name?.charAt(0)?.toUpperCase() || '?'}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-semibold text-slate-800 dark:text-slate-100 text-sm">{user.full_name}</p>
-                      {!user.is_active && <span className="text-[10px] px-1.5 py-0.5 bg-red-500/10 text-red-400 rounded border border-red-500/20">Inactive</span>}
+        ) : activeTab === 'teams' ? (
+          teams.length === 0 ? (
+            <div className="cf-card px-6 py-14 text-center">
+              <p className="font-serif text-2xl text-[var(--fg)]">No teams yet</p>
+              <p className="mt-2 text-sm text-[var(--fg-muted)] max-w-md mx-auto">
+                Create a team first. Projects can attach to it later — you no longer need a project just to have a team.
+              </p>
+              <button onClick={() => setShowCreateTeam(true)} className="cf-btn-primary mt-5 inline-flex">
+                Create a team
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+              <div className="lg:col-span-2 space-y-2">
+                {teams.map((team) => (
+                  <button
+                    key={team.id}
+                    onClick={() => setSelectedTeamId(team.id)}
+                    className={`w-full text-left p-4 rounded-xl border transition-all ${
+                      selectedTeamId === team.id
+                        ? 'border-[var(--accent)]/50 bg-[var(--accent-soft)]'
+                        : 'border-[var(--border)] bg-[var(--bg-elevated)] hover:border-[var(--accent)]/30'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-[var(--fg)] truncate">{team.name}</p>
+                        <p className="text-xs text-[var(--fg-muted)] mt-0.5">
+                          {team.manager_name ? `Lead: ${team.manager_name}` : 'No lead assigned'}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-lg font-bold text-[var(--accent)]">{team.member_count}</p>
+                        <p className="text-[10px] text-[var(--fg-muted)]">people</p>
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-400">{user.email}</p>
-                    {user.position && <p className="text-xs text-slate-500 mt-0.5">{user.position}</p>}
+                    <p className="mt-2 text-[11px] text-[var(--fg-muted)]">
+                      {Number(team.project_count || 0)} project{Number(team.project_count || 0) === 1 ? '' : 's'}
+                    </p>
+                  </button>
+                ))}
+                <button
+                  onClick={() => setShowCreateTeam(true)}
+                  className="w-full rounded-xl border-2 border-dashed border-[var(--border)] p-3 text-sm text-[var(--fg-muted)] hover:border-[var(--accent)]/40 hover:text-[var(--accent)]"
+                >
+                  + New team
+                </button>
+              </div>
+
+              <div className="lg:col-span-3 cf-card p-5 min-h-[280px]">
+                {!selectedTeamId ? (
+                  <p className="text-sm text-[var(--fg-muted)] py-12 text-center">Select a team to see people and projects.</p>
+                ) : detailLoading || !detail ? (
+                  <div className="flex justify-center py-16">
+                    <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {user.team_name && (
-                      <span className="hidden sm:block text-xs text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-lg">
-                        {user.team_name}
-                      </span>
-                    )}
-                    <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border ${ROLE_COLORS[user.role] || ROLE_COLORS.executive}`}>
-                      {ROLE_LABELS[user.role] || user.role}
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+                ) : (
+                  <TeamDetailPanel
+                    detail={detail}
+                    unassignedPeople={unassignedPeople}
+                    tenantId={tenantId}
+                    api={API}
+                    onChanged={() => { fetchData(); loadDetail(detail.team.id); }}
+                    onError={setError}
+                  />
+                )}
+              </div>
+            </div>
+          )
         ) : (
           <div className="space-y-2">
-            {teams.length === 0 ? (
-              <div className="text-center py-16 text-slate-400">
-                <p className="text-sm">No teams created yet. Create a project to auto-create a team.</p>
-              </div>
-            ) : (
-              teams.map(team => (
-                <div key={team.id} className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/70 dark:border-slate-800 hover:border-teal-500/30 transition-all">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-slate-800 dark:text-slate-100">{team.name}</p>
-                      {team.manager_name && <p className="text-xs text-slate-400 mt-0.5">Manager: {team.manager_name}</p>}
-                      {team.description && <p className="text-xs text-slate-500 mt-1">{team.description}</p>}
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-2xl font-bold text-teal-400">{team.member_count}</p>
-                      <p className="text-[10px] text-slate-400">members</p>
-                    </div>
-                  </div>
+            {users.map((user) => (
+              <div key={user.id} className="flex items-center gap-4 p-4 cf-card">
+                <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] flex items-center justify-center shrink-0">
+                  <span className="text-[var(--accent)] font-bold text-sm">{user.full_name?.charAt(0)?.toUpperCase() || '?'}</span>
                 </div>
-              ))
-            )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-[var(--fg)] text-sm">{user.full_name}</p>
+                    {!user.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/20 text-red-500">Inactive</span>}
+                  </div>
+                  <p className="text-xs text-[var(--fg-muted)]">{user.email}</p>
+                  {user.position && <p className="text-xs text-[var(--fg-muted)] mt-0.5">{user.position}</p>}
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-[50%]">
+                  {(user.teams || []).map((t) => (
+                    <span key={t.id} className="text-[11px] bg-[var(--bg)] border border-[var(--border)] px-2 py-0.5 rounded-lg text-[var(--fg-muted)]">
+                      {t.name}
+                    </span>
+                  ))}
+                  <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border ${ROLE_COLORS[user.role] || ROLE_COLORS.executive}`}>
+                    {user.role}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
+      <CreateTeamModal
+        open={showCreateTeam}
+        onClose={() => setShowCreateTeam(false)}
+        tenantId={tenantId}
+        users={users}
+        api={API}
+        onCreated={(id) => {
+          setShowCreateTeam(false);
+          fetchData();
+          setActiveTab('teams');
+          setSelectedTeamId(id);
+        }}
+      />
       <CreateUserModal
         open={showCreateUser}
         onClose={() => setShowCreateUser(false)}
-        onCreated={() => { fetchData(); }}
+        onCreated={() => { fetchData(); if (selectedTeamId) loadDetail(selectedTeamId); }}
         tenantId={tenantId}
         teams={teams}
+        api={API}
       />
     </AppShell>
+  );
+}
+
+function TeamDetailPanel({
+  detail, unassignedPeople, tenantId, api, onChanged, onError,
+}: {
+  detail: TeamDetail;
+  unassignedPeople: UserProfile[];
+  tenantId: string;
+  api: string;
+  onChanged: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [adding, setAdding] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function addExisting() {
+    if (!adding) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`${api}/v1/teams/${detail.team.id}/members`, {
+        method: 'POST',
+        headers: await getBackendAuthHeaders(),
+        body: JSON.stringify({ tenantId, userProfileId: adding, role: 'executive' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not add person');
+      setAdding('');
+      onChanged();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not add person');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeMember(userProfileId: string) {
+    setBusy(true);
+    try {
+      const res = await fetch(`${api}/v1/teams/${detail.team.id}/members/${userProfileId}?tenantId=${tenantId}`, {
+        method: 'DELETE',
+        headers: await getBackendAuthHeaders(),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Could not remove person');
+      }
+      onChanged();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not remove person');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h3 className="font-serif text-2xl text-[var(--fg)]">{detail.team.name}</h3>
+        {detail.team.description && (
+          <p className="mt-1 text-sm text-[var(--fg-muted)]">{detail.team.description}</p>
+        )}
+      </div>
+
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)] mb-2">People</p>
+        <div className="space-y-2">
+          {detail.members.length === 0 && (
+            <p className="text-xs text-[var(--fg-muted)]">Nobody on this team yet.</p>
+          )}
+          {detail.members.map((m) => (
+            <div key={m.user_profile_id} className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[var(--fg)] truncate">{m.full_name}</p>
+                <p className="text-[11px] text-[var(--fg-muted)] truncate">{m.email}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[10px] uppercase tracking-wide text-[var(--fg-muted)]">{m.role}</span>
+                <button
+                  disabled={busy}
+                  onClick={() => removeMember(m.user_profile_id)}
+                  className="text-[11px] text-[var(--fg-muted)] hover:text-red-500"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {unassignedPeople.length > 0 && (
+          <div className="mt-3 flex gap-2">
+            <select
+              value={adding}
+              onChange={(e) => setAdding(e.target.value)}
+              className="cf-input !py-2 !text-sm flex-1"
+            >
+              <option value="">Add someone already in the workspace…</option>
+              {unassignedPeople.map((u) => (
+                <option key={u.id} value={u.id}>{u.full_name} · {u.email}</option>
+              ))}
+            </select>
+            <button disabled={!adding || busy} onClick={addExisting} className="cf-btn-secondary !px-3 !py-2 text-xs">
+              Add
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)] mb-2">Projects</p>
+        {detail.projects.length === 0 ? (
+          <p className="text-xs text-[var(--fg-muted)]">
+            None yet.{' '}
+            <Link href="/projects" className="font-semibold text-[var(--accent)]">Create a project</Link>
+            {' '}and assign this team.
+          </p>
+        ) : (
+          <ul className="space-y-1">
+            {detail.projects.map((p) => (
+              <li key={p.id} className="flex items-center justify-between text-sm">
+                <span className="text-[var(--fg)]">{p.name}</span>
+                <span className="text-[11px] capitalize text-[var(--fg-muted)]">{p.status}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CreateTeamModal({
+  open, onClose, tenantId, users, api, onCreated,
+}: {
+  open: boolean; onClose: () => void; tenantId: string;
+  users: UserProfile[]; api: string; onCreated: (id: string) => void;
+}) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [managerId, setManagerId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setName('');
+      setDescription('');
+      setManagerId('');
+      setError('');
+    }
+  }, [open]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) {
+      setError('Give the team a name');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${api}/v1/teams`, {
+        method: 'POST',
+        headers: await getBackendAuthHeaders(),
+        body: JSON.stringify({
+          tenantId,
+          name,
+          description,
+          managerId: managerId || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not create team');
+      onCreated(data.team.id);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="New team" subtitle="You will be added automatically. Invite people next.">
+      {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">Team name *</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Mumbai sales" className="cf-input !rounded-lg !px-3 !py-2.5" />
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">What does this team cover?</label>
+          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" className="cf-input !rounded-lg !px-3 !py-2.5" />
+        </div>
+        {users.length > 0 && (
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">Team lead</label>
+            <select value={managerId} onChange={(e) => setManagerId(e.target.value)} className="cf-input !rounded-lg !px-3 !py-2.5">
+              <option value="">You (default)</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.full_name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="flex gap-2 pt-2">
+          <button type="button" onClick={onClose} className="cf-btn-secondary flex-1">Cancel</button>
+          <button type="submit" disabled={loading} className="cf-btn-primary flex-[2]">{loading ? 'Creating…' : 'Create team'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function CreateUserModal({
+  open, onClose, onCreated, tenantId, teams, api,
+}: {
+  open: boolean; onClose: () => void; onCreated: () => void;
+  tenantId: string; teams: Team[]; api: string;
+}) {
+  const [form, setForm] = useState({
+    fullName: '', email: '', password: '', phone: '',
+    role: 'executive', position: '', teamId: '',
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setForm({
+        fullName: '', email: '', password: '', phone: '',
+        role: 'executive', position: '', teamId: teams[0]?.id || '',
+      });
+      setError('');
+    }
+  }, [open, teams]);
+
+  if (!open) return null;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.fullName || !form.email || !form.password) {
+      setError('Name, email and password are required');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${api}/v1/users/create`, {
+        method: 'POST',
+        headers: await getBackendAuthHeaders(),
+        body: JSON.stringify({ tenantId, ...form }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create user');
+      onCreated();
+      onClose();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add a person" subtitle="They can sign in to this workspace immediately.">
+      {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      <form onSubmit={handleSubmit} className="space-y-3">
+        {[
+          { label: 'Full name *', field: 'fullName', type: 'text', placeholder: 'Priya Shah' },
+          { label: 'Email *', field: 'email', type: 'email', placeholder: 'priya@company.com' },
+          { label: 'Temporary password *', field: 'password', type: 'password', placeholder: '••••••••' },
+          { label: 'Phone', field: 'phone', type: 'tel', placeholder: '+91 98765 43210' },
+          { label: 'Job title', field: 'position', type: 'text', placeholder: 'Sales executive' },
+        ].map(({ label, field, type, placeholder }) => (
+          <div key={field}>
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">{label}</label>
+            <input
+              type={type}
+              value={(form as Record<string, string>)[field]}
+              onChange={(e) => setForm((f) => ({ ...f, [field]: e.target.value }))}
+              placeholder={placeholder}
+              className="cf-input !rounded-lg !px-3 !py-2.5"
+            />
+          </div>
+        ))}
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">Workspace role *</label>
+          <select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))} className="cf-input !rounded-lg !px-3 !py-2.5">
+            <option value="executive">Executive — {ROLE_HELP.executive}</option>
+            <option value="manager">Manager — {ROLE_HELP.manager}</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--fg-muted)]">Put them on a team</label>
+          <select value={form.teamId} onChange={(e) => setForm((f) => ({ ...f, teamId: e.target.value }))} className="cf-input !rounded-lg !px-3 !py-2.5">
+            <option value="">Assign later</option>
+            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          {teams.length === 0 && (
+            <p className="mt-1 text-[11px] text-[var(--fg-muted)]">Create a team first if you want them grouped under a campaign owner.</p>
+          )}
+        </div>
+        <div className="flex gap-2 pt-2">
+          <button type="button" onClick={onClose} className="cf-btn-secondary flex-1">Cancel</button>
+          <button type="submit" disabled={loading} className="cf-btn-primary flex-[2]">{loading ? 'Adding…' : 'Add person'}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }

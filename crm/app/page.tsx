@@ -160,16 +160,17 @@ export default function DashboardPage() {
               </svg>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-teal-900 dark:text-teal-100">Welcome to CortexFlow! Create your first project to get started.</p>
-              <p className="text-xs text-teal-700/80 dark:text-teal-300/70 mt-0.5">Organise leads, assign teams, and set up your AI calling knowledge base — all in one project.</p>
+              <p className="text-sm font-bold text-teal-900 dark:text-teal-100">Workspace is ready. Add a team, then a project.</p>
+              <p className="text-xs text-teal-700/80 dark:text-teal-300/70 mt-0.5">Teams own people. Projects own campaigns the AI sells. Do teams first so assignment is not a dead-end.</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => { setShowProjectPrompt(false); (document.querySelector('[data-action="new-project"]') as HTMLButtonElement)?.click(); }}
+              <Link
+                href="/team"
+                onClick={() => setShowProjectPrompt(false)}
                 className="px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white rounded-xl text-xs font-semibold shadow-sm transition-colors"
               >
-                Create Project
-              </button>
+                Open Team
+              </Link>
               <button onClick={() => setShowProjectPrompt(false)} className="p-1.5 text-teal-600/50 hover:text-teal-700 dark:text-teal-400 rounded-lg transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>

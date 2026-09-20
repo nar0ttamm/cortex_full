@@ -22,17 +22,30 @@ router.get('/users', asyncHandler(async (req, res) => {
 
   const result = await db.query(
     `SELECT up.*, au.email,
-            t.name as team_name, tm.team_id
+            COALESCE(
+              json_agg(
+                json_build_object('id', t.id, 'name', t.name)
+                ORDER BY t.name
+              ) FILTER (WHERE t.id IS NOT NULL),
+              '[]'::json
+            ) AS teams
      FROM user_profiles up
      JOIN auth.users au ON au.id = up.user_id
      LEFT JOIN team_members tm ON tm.user_profile_id = up.id
      LEFT JOIN teams t ON t.id = tm.team_id
      WHERE up.tenant_id = $1
+     GROUP BY up.id, au.email
      ORDER BY up.created_at ASC`,
     [tenantId]
   );
 
-  return res.json({ users: result.rows });
+  const users = result.rows.map((row) => ({
+    ...row,
+    team_name: row.teams?.[0]?.name || null,
+    team_id: row.teams?.[0]?.id || null,
+  }));
+
+  return res.json({ users });
 }));
 
 // GET /v1/users/me?tenantId=&userId=
@@ -75,6 +88,9 @@ router.post('/users/create', asyncHandler(async (req, res) => {
 
   if (!['manager', 'executive'].includes(role)) {
     return res.status(400).json({ error: 'Role must be manager or executive' });
+  }
+  if (req.role && !['admin', 'manager'].includes(req.role)) {
+    return res.status(403).json({ error: 'Only admins and managers can add people' });
   }
 
   // Use Supabase Admin API to create the auth user

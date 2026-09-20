@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Create user_profile
-    const { error: profileErr } = await supabase
+    const { data: profileRow, error: profileErr } = await supabase
       .from('user_profiles')
       .upsert({
         user_id: userId,
@@ -90,11 +90,38 @@ export async function POST(req: NextRequest) {
         role: 'admin',
         position: position || null,
         is_active: true,
-      }, { onConflict: 'user_id' });
+      }, { onConflict: 'user_id' })
+      .select('id')
+      .maybeSingle();
 
     if (profileErr) {
       console.error('[onboarding] user_profile creation error:', profileErr);
       // Non-fatal — tenant was created, user can still log in
+    }
+
+    // 2b. Seed a default team so admins are not forced to create a project first.
+    if (profileRow?.id) {
+      const { data: teamRow, error: teamErr } = await supabase
+        .from('teams')
+        .insert({
+          tenant_id: userId,
+          name: `${companyName.trim()} team`.slice(0, 80),
+          manager_id: profileRow.id,
+          description: 'Default team for this workspace. Add people, then assign projects.',
+        })
+        .select('id')
+        .maybeSingle();
+
+      if (teamErr) {
+        console.error('[onboarding] default team error:', teamErr);
+      } else if (teamRow?.id) {
+        const { error: memberErr } = await supabase.from('team_members').insert({
+          team_id: teamRow.id,
+          user_profile_id: profileRow.id,
+          role: 'manager',
+        });
+        if (memberErr) console.error('[onboarding] default team member error:', memberErr);
+      }
     }
 
     // 3. Log activity
