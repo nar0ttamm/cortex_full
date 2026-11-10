@@ -13,9 +13,11 @@
  *   GOOGLE_REDIRECT_URI  (e.g. https://cortex-backend-api.vercel.app/v1/google-calendar/callback)
  */
 const { Router } = require('express');
+const crypto = require('crypto');
 const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const config = require('../config');
+const { encryptCredentials, decryptCredentials } = require('../encryption');
 
 const router = Router();
 
@@ -35,6 +37,36 @@ function getGoogleAuthUrl(state) {
     state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+}
+
+function sealToken(value) {
+  if (!value) return null;
+  return encryptCredentials({ value });
+}
+
+function openToken(stored) {
+  if (!stored) return null;
+  if (!String(stored).includes(':')) return stored;
+  const parsed = decryptCredentials(stored);
+  return parsed?.value || null;
+}
+
+function signState(tenantId) {
+  const payload = Buffer.from(JSON.stringify({ tenantId, exp: Date.now() + 10 * 60 * 1000 })).toString('base64url');
+  const sig = crypto.createHmac('sha256', process.env.ENCRYPTION_KEY).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+function readState(state) {
+  const [payload, sig] = String(state || '').split('.');
+  if (!payload || !sig || !process.env.ENCRYPTION_KEY) return null;
+  const expected = crypto.createHmac('sha256', process.env.ENCRYPTION_KEY).update(payload).digest('base64url');
+  const left = Buffer.from(sig);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length || !crypto.timingSafeEqual(left, right)) return null;
+  const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString());
+  if (!decoded.tenantId || decoded.exp < Date.now()) return null;
+  return decoded.tenantId;
 }
 
 async function refreshAccessToken(refreshToken) {
@@ -60,15 +92,16 @@ async function getValidToken(tenantId) {
   if (!result.rows.length) return null;
 
   const token = result.rows[0];
+  token.access_token = openToken(token.access_token);
+  token.refresh_token = openToken(token.refresh_token);
   const expiresAt = new Date(token.token_expiry).getTime();
 
   if (expiresAt - Date.now() < 5 * 60 * 1000 && token.refresh_token) {
-    // Refresh token
     const refreshed = await refreshAccessToken(token.refresh_token);
     const newExpiry = new Date(Date.now() + refreshed.expires_in * 1000).toISOString();
     await db.query(
       `UPDATE google_calendar_tokens SET access_token = $1, token_expiry = $2, updated_at = now() WHERE tenant_id = $3`,
-      [refreshed.access_token, newExpiry, tenantId]
+      [sealToken(refreshed.access_token), newExpiry, tenantId]
     );
     return { ...token, access_token: refreshed.access_token };
   }
@@ -78,13 +111,15 @@ async function getValidToken(tenantId) {
 
 // GET /v1/google-calendar/auth
 router.get('/google-calendar/auth', asyncHandler(async (req, res) => {
-  const { tenantId } = req.query;
-  if (!tenantId) return res.status(400).json({ error: 'tenantId required' });
+  const tenantId = req.tenantId;
+  if (!tenantId || (req.query.tenantId && req.query.tenantId !== tenantId)) {
+    return res.status(403).json({ error: 'Tenant mismatch' });
+  }
   if (!config.googleClientId || !config.googleRedirectUri) {
     return res.status(503).json({ error: 'Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_REDIRECT_URI.' });
   }
 
-  const state = Buffer.from(JSON.stringify({ tenantId })).toString('base64url');
+  const state = signState(tenantId);
   const url = getGoogleAuthUrl(state);
   return res.json({ url });
 }));
@@ -97,13 +132,8 @@ router.get('/google-calendar/callback', asyncHandler(async (req, res) => {
     return res.redirect(`${config.backendUrl.replace('/api', '')}/integrations?error=google_calendar_denied`);
   }
 
-  let tenantId;
-  try {
-    const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
-    tenantId = decoded.tenantId;
-  } catch {
-    return res.status(400).send('Invalid state parameter');
-  }
+  const tenantId = readState(state);
+  if (!tenantId) return res.status(400).send('Invalid state parameter');
 
   // Exchange code for tokens
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -133,7 +163,7 @@ router.get('/google-calendar/callback', asyncHandler(async (req, res) => {
      ON CONFLICT (tenant_id) DO UPDATE SET
        access_token = $2, refresh_token = COALESCE($3, google_calendar_tokens.refresh_token),
        token_expiry = $4, sync_enabled = true, updated_at = now()`,
-    [tenantId, tokens.access_token, tokens.refresh_token || null, expiry]
+    [tenantId, sealToken(tokens.access_token), sealToken(tokens.refresh_token), expiry]
   );
 
   // Log activity
@@ -149,8 +179,10 @@ router.get('/google-calendar/callback', asyncHandler(async (req, res) => {
 
 // GET /v1/google-calendar/status
 router.get('/google-calendar/status', asyncHandler(async (req, res) => {
-  const { tenantId } = req.query;
-  if (!tenantId) return res.status(400).json({ error: 'tenantId required' });
+  const tenantId = req.tenantId;
+  if (!tenantId || (req.query.tenantId && req.query.tenantId !== tenantId)) {
+    return res.status(403).json({ error: 'Tenant mismatch' });
+  }
 
   const result = await db.query(
     `SELECT sync_enabled, calendar_id, token_expiry, created_at FROM google_calendar_tokens WHERE tenant_id = $1`,
@@ -166,10 +198,14 @@ router.get('/google-calendar/status', asyncHandler(async (req, res) => {
 
 // POST /v1/google-calendar/create-event
 router.post('/google-calendar/create-event', asyncHandler(async (req, res) => {
-  const { tenantId, appointmentId, title, description, startTime, endTime, attendeeEmail, attendeeName } = req.body;
+  const tenantId = req.tenantId;
+  const { appointmentId, title, description, startTime, endTime, attendeeEmail, attendeeName } = req.body;
+  if (req.body?.tenantId && req.body.tenantId !== tenantId) {
+    return res.status(403).json({ error: 'Tenant mismatch' });
+  }
 
   if (!tenantId || !startTime) {
-    return res.status(400).json({ error: 'tenantId and startTime are required' });
+    return res.status(400).json({ error: 'startTime is required' });
   }
 
   const tokenData = await getValidToken(tenantId);
@@ -232,8 +268,10 @@ router.post('/google-calendar/create-event', asyncHandler(async (req, res) => {
 
 // DELETE /v1/google-calendar/disconnect
 router.delete('/google-calendar/disconnect', asyncHandler(async (req, res) => {
-  const { tenantId } = req.query;
-  if (!tenantId) return res.status(400).json({ error: 'tenantId required' });
+  const tenantId = req.tenantId;
+  if (!tenantId || (req.query.tenantId && req.query.tenantId !== tenantId)) {
+    return res.status(403).json({ error: 'Tenant mismatch' });
+  }
 
   await db.query(`DELETE FROM google_calendar_tokens WHERE tenant_id = $1`, [tenantId]);
 

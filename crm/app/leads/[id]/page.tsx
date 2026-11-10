@@ -10,6 +10,7 @@ import { useTenantId } from '@/app/hooks/useTenantId';
 import { isCallStatusLive, labelForCallDbStatus } from '@/lib/callStatusUi';
 import { formatCallOutcome } from '@/lib/leadOutcomeLabels';
 import { LeadConversionPanel } from '../../components/LeadConversionPanel';
+import { LeadTimeline } from '../../components/LeadTimeline';
 
 interface Note {
   id: string;
@@ -303,6 +304,7 @@ export default function LeadDetailPage() {
               onCallNow={handleStartAiCall}
               calling={startingCall}
             />
+            <LeadTimeline leadId={leadId} />
 
             {/* Basic info */}
             <div className={card}>

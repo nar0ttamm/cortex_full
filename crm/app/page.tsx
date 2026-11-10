@@ -27,14 +27,19 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [isAuthError, setIsAuthError] = useState(false);
   const [showProjectPrompt, setShowProjectPrompt] = useState(false);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
   const fetchAll = useCallback(async (isRefresh = false, attempt = 1) => {
     try {
       if (isRefresh) setRefreshing(true);
       else { setLoading(true); setError(null); setIsAuthError(false); }
 
+      const params = new URLSearchParams();
+      if (fromDate) params.set('from', fromDate);
+      if (toDate) params.set('to', toDate);
       const [statsRes, activityRes] = await Promise.all([
-        fetch('/api/stats'),
+        fetch(`/api/stats${params.toString() ? `?${params}` : ''}`),
         fetch('/api/activity'),
       ]);
 
@@ -58,6 +63,8 @@ export default function DashboardPage() {
       const statsData = await statsRes.json();
       setStats(statsData.stats);
       setAnalytics(statsData.analytics ?? null);
+      if (statsData.stats?.from) setFromDate(statsData.stats.from);
+      if (statsData.stats?.to) setToDate(statsData.stats.to);
       setError(null);
 
       if (activityRes.ok) {
@@ -70,7 +77,7 @@ export default function DashboardPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [fromDate, toDate]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -175,6 +182,63 @@ export default function DashboardPage() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             </div>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100">Reporting period</h2>
+            <p className="text-xs text-slate-500 mt-1">Dates use India Standard Time. Charts and totals follow this range.</p>
+          </div>
+          <form
+            className="flex flex-wrap items-end gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void fetchAll(true);
+            }}
+          >
+            <label className="text-xs text-slate-500">
+              From
+              <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className="mt-1 block rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm" />
+            </label>
+            <label className="text-xs text-slate-500">
+              To
+              <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} className="mt-1 block rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm" />
+            </label>
+            <button type="submit" className="rounded-xl bg-teal-600 px-3 py-2 text-xs font-semibold text-white">Apply</button>
+          </form>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
+          {[
+            ['Total leads', stats.totalLeads],
+            ['New', stats.newLeads],
+            ['Assigned', stats.assignedLeads ?? '—'],
+            ['Unassigned', stats.unassignedLeads ?? '—'],
+            ['Calls made', stats.callsMade ?? '—'],
+            ['Calls completed', stats.callsCompleted ?? '—'],
+            ['Interested', stats.interestedLeads],
+            ['Not interested', stats.notInterestedLeads],
+            ['Appointments', stats.appointmentsToday],
+            ['Confirmed', stats.confirmedAppointments],
+            ['Conversion', `${stats.conversionRate}%`],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="rounded-2xl border border-slate-200/70 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+              <p className="mt-1 text-lg font-bold text-slate-800 dark:text-slate-100">{value}</p>
+            </div>
+          ))}
+        </div>
+        {stats.team && stats.team.length > 0 && (
+          <div className="rounded-2xl border border-slate-200/70 dark:border-slate-700 bg-white dark:bg-slate-800 p-4">
+            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100">Team performance</h2>
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+              {stats.team.map((member) => (
+                <li key={member.name} className="flex items-center justify-between rounded-xl bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm">
+                  <span>{member.name}</span>
+                  <span className="font-semibold">{member.leads} leads</span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

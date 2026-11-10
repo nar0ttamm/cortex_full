@@ -8,6 +8,8 @@ const { enqueueCall } = require('../services/callQueueService');
 const { resolveProject } = require('../services/projectResolver');
 const { seesAllLeads, canViewLead } = require('../services/leadAccess');
 const { isAllowedLeadStatus } = require('../services/leadStatuses');
+const { parseCsv, leadFromCsvRow } = require('../services/csvParse');
+const { buildTimeline } = require('../services/leadTimeline');
 const { buildConversionMetrics } = require('../services/conversionAnalytics');
 
 const LEAD_SELECT = `
@@ -141,6 +143,135 @@ router.get('/leads/:tenantId', asyncHandler(async (req, res) => {
   return res.json({ leads: result.rows, count: result.rows.length });
 }));
 
+router.get('/leads/:tenantId/duplicates', asyncHandler(async (req, res) => {
+  if (req.tenantId && req.params.tenantId !== req.tenantId) {
+    return res.status(403).json({ error: 'Tenant mismatch' });
+  }
+  const result = await db.query(
+    `SELECT phone, COUNT(*)::int AS count,
+            json_agg(json_build_object('id', id, 'name', name, 'status', status, 'created_at', created_at) ORDER BY created_at) AS leads
+     FROM leads
+     WHERE tenant_id = $1 AND phone IS NOT NULL AND phone <> ''
+     GROUP BY phone
+     HAVING COUNT(*) > 1
+     ORDER BY count DESC
+     LIMIT 100`,
+    [req.tenantId]
+  );
+  return res.json({ duplicates: result.rows });
+}));
+
+router.post('/leads/import', asyncHandler(async (req, res) => {
+  if (!req.tenantId) return res.status(403).json({ error: 'Tenant mismatch' });
+  const parsed = parseCsv(req.body?.csv || '');
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  const preview = parsed.rows.map((record) => ({ row: record.row, ...leadFromCsvRow(record.value) }));
+  const invalid = [];
+  const candidates = [];
+  preview.forEach((row) => {
+    if (!row.name || !row.phone) invalid.push({ row: row.row, error: 'Name and phone are required' });
+    else candidates.push(row);
+  });
+  const seen = new Set();
+  const fileDuplicates = [];
+  const unique = [];
+  candidates.forEach((row) => {
+    const key = row.phone.replace(/\s+/g, '');
+    if (seen.has(key)) fileDuplicates.push({ row: row.row, phone: row.phone, error: 'Duplicate phone in this file' });
+    else {
+      seen.add(key);
+      unique.push(row);
+    }
+  });
+  const existing = unique.length === 0
+    ? { rows: [] }
+    : await db.query(
+      'SELECT phone FROM leads WHERE tenant_id = $1 AND phone = ANY($2::text[])',
+      [req.tenantId, unique.map((row) => row.phone)]
+    );
+  const existingPhones = new Set(existing.rows.map((row) => row.phone));
+  const alreadyStored = unique.filter((row) => existingPhones.has(row.phone));
+  const fresh = unique.filter((row) => !existingPhones.has(row.phone));
+  if (req.body?.commit !== true) {
+    return res.json({
+      preview: true,
+      ready: fresh.length,
+      invalid,
+      file_duplicates: fileDuplicates,
+      existing: alreadyStored.map((row) => ({ row: row.row, phone: row.phone, name: row.name })),
+      parse_errors: parsed.errors,
+    });
+  }
+  let imported = 0;
+  const insertErrors = [];
+  for (const row of fresh) {
+    try {
+      await db.query(
+        `INSERT INTO leads (tenant_id, project_id, name, phone, email, inquiry, source, status, metadata, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'new', $8::jsonb, NOW(), NOW())`,
+        [
+          req.tenantId,
+          row.project_id || null,
+          row.name,
+          row.phone,
+          row.email || null,
+          row.inquiry || null,
+          row.source,
+          JSON.stringify({ imported_from: 'csv', call_initiated: false }),
+        ]
+      );
+      imported += 1;
+    } catch (err) {
+      insertErrors.push({ row: row.row, error: 'This row was not imported' });
+      console.warn('[import] row skipped:', err.message);
+    }
+  }
+  return res.json({
+    preview: false,
+    imported,
+    skipped_existing: alreadyStored.length,
+    invalid: [...invalid, ...insertErrors],
+    file_duplicates: fileDuplicates,
+    existing: alreadyStored.map((row) => ({ row: row.row, phone: row.phone, name: row.name })),
+    parse_errors: parsed.errors,
+  });
+}));
+
+router.post('/leads/:leadId/claim', asyncHandler(async (req, res) => {
+  if (!req.tenantId || !req.userId) return res.status(403).json({ error: 'Tenant mismatch' });
+  const result = await db.query(
+    `UPDATE leads l
+     SET assigned_to = p.id,
+         updated_at = NOW(),
+         metadata = jsonb_set(
+           COALESCE(l.metadata, '{}'::jsonb),
+           '{assignment_history}',
+           COALESCE(l.metadata->'assignment_history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+             'to', p.id,
+             'by', $3::text,
+             'at', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+             'action', 'claim'
+           ))
+         )
+     FROM user_profiles p
+     WHERE l.id = $1
+       AND l.tenant_id = $2
+       AND p.user_id = $3
+       AND p.tenant_id = l.tenant_id
+       AND p.is_active IS DISTINCT FROM false
+       AND l.assigned_to IS NULL
+     RETURNING l.id, l.assigned_to`,
+    [req.params.leadId, req.tenantId, req.userId]
+  );
+  if (result.rows.length > 0) return res.json({ status: 'claimed', lead: result.rows[0] });
+  const existing = await db.query(
+    'SELECT id, assigned_to FROM leads WHERE id = $1 AND tenant_id = $2',
+    [req.params.leadId, req.tenantId]
+  );
+  if (existing.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
+  return res.status(409).json({ error: 'This lead is already assigned' });
+}));
+
 // GET /v1/leads/:tenantId/:leadId
 router.get('/leads/:tenantId/:leadId', asyncHandler(async (req, res) => {
   const tenantId = req.tenantId || req.params.tenantId;
@@ -159,6 +290,44 @@ router.get('/leads/:tenantId/:leadId', asyncHandler(async (req, res) => {
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
   return res.json({ lead: result.rows[0] });
+}));
+
+router.get('/leads/:tenantId/:leadId/timeline', asyncHandler(async (req, res) => {
+  const tenantId = req.tenantId;
+  if (!tenantId || req.params.tenantId !== tenantId) return res.status(403).json({ error: 'Tenant mismatch' });
+  const leadResult = await db.query(
+    `${LEAD_SELECT} WHERE l.tenant_id = $1 AND l.id = $2
+       AND (
+         $3::boolean
+         OR l.assigned_to IS NULL
+         OR l.assigned_to = (SELECT id FROM user_profiles WHERE user_id = $4 AND tenant_id = l.tenant_id LIMIT 1)
+       )`,
+    [tenantId, req.params.leadId, seesAllLeads(req.role), req.userId || null]
+  );
+  if (leadResult.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
+  const lead = leadResult.rows[0];
+  const [calls, communications, appointments] = await Promise.all([
+    db.query(
+      `SELECT id, status, outcome, started_at, created_at FROM calls WHERE tenant_id = $1 AND lead_id = $2 ORDER BY COALESCE(started_at, created_at) DESC LIMIT 50`,
+      [tenantId, lead.id]
+    ),
+    db.query(
+      `SELECT id, channel, direction, status, created_at FROM communications WHERE tenant_id = $1 AND lead_id = $2 ORDER BY created_at DESC LIMIT 50`,
+      [tenantId, lead.id]
+    ),
+    db.query(
+      `SELECT id, status, scheduled_at, title FROM appointments WHERE tenant_id = $1 AND lead_id = $2 ORDER BY scheduled_at DESC LIMIT 50`,
+      [tenantId, lead.id]
+    ).catch(() => ({ rows: [] })),
+  ]);
+  return res.json({
+    events: buildTimeline({
+      lead,
+      calls: calls.rows,
+      communications: communications.rows,
+      appointments: appointments.rows,
+    }),
+  });
 }));
 
 // GET /v1/leads/by-phone/:tenantId/:phone
@@ -234,6 +403,23 @@ router.patch('/leads/:leadId', asyncHandler(async (req, res) => {
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
   const updated = result.rows[0];
+
+  if (status !== undefined) {
+    await db.query(
+      `UPDATE leads
+       SET metadata = jsonb_set(
+         COALESCE(metadata, '{}'::jsonb),
+         '{status_history}',
+         COALESCE(metadata->'status_history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+           'to', $1::text,
+           'by', $2::text,
+           'at', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+         ))
+       )
+       WHERE id = $3 AND tenant_id = $4`,
+      [status, req.userId || null, leadId, req.tenantId]
+    ).catch((err) => console.warn('[leads] status history skipped:', err.message));
+  }
 
   if (nextAssignee !== undefined) {
     await db.query(

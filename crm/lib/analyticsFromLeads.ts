@@ -22,11 +22,63 @@ const LABEL: Record<string, string> = {
 
 const SOURCE_PALETTE = ['#e24b1b', '#1a6b63', '#c4841d', '#f06a3a', '#6b645b', '#3d9d93'];
 
-export function buildDashboardAnalytics(leads: any[]): DashboardAnalyticsPayload {
+function trendDays(range?: { from: string; to: string }): { key: string; label: string; bucket: 'day' | 'week' }[] {
+  if (!range?.from || !range?.to) {
+    const days: { key: string; label: string; bucket: 'day' | 'week' }[] = [];
+    for (let i = 6; i >= 0; i -= 1) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const key = date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      days.push({ key, label: key.slice(8), bucket: 'day' as const });
+    }
+    return days;
+  }
+  const start = new Date(`${range.from}T00:00:00+05:30`);
+  const end = new Date(`${range.to}T00:00:00+05:30`);
+  const span = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+  const bucket: 'day' | 'week' = span > 31 ? 'week' : 'day';
+  const days: { key: string; label: string; bucket: 'day' | 'week' }[] = [];
+  const cursor = new Date(start);
+  const seen = new Set<string>();
+  while (cursor.getTime() <= end.getTime() && days.length < 370) {
+    const key = bucket === 'day'
+      ? cursor.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+      : weekKey(cursor);
+    if (!seen.has(key)) {
+      seen.add(key);
+      days.push({
+        key,
+        label: bucket === 'day' ? key.slice(8) : key,
+        bucket,
+      });
+    }
+    cursor.setTime(cursor.getTime() + 86400000);
+  }
+  return days;
+}
+
+function weekKey(date: Date) {
+  const copy = new Date(date);
+  const day = copy.getUTCDay() || 7;
+  copy.setUTCDate(copy.getUTCDate() - day + 1);
+  return copy.toISOString().slice(0, 10);
+}
+
+function trendKey(value: string | undefined, bucket: 'day' | 'week') {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  if (bucket === 'week') return weekKey(date);
+  return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
+export function buildDashboardAnalytics(
+  leads: any[],
+  range?: { from: string; to: string }
+): DashboardAnalyticsPayload {
   const total = leads.length;
   const byStatus: Record<string, number> = {};
   const bySource: Record<string, number> = {};
-  const byDay: Record<string, number> = {};
   let callsDone = 0;
   let callsPending = 0;
   let callsFailed = 0;
@@ -37,12 +89,6 @@ export function buildDashboardAnalytics(leads: any[]): DashboardAnalyticsPayload
 
     const src = l.source || 'Direct';
     bySource[src] = (bySource[src] || 0) + 1;
-
-    const dt = l.created_at || l.timestamp;
-    if (dt) {
-      const day = new Date(dt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-      byDay[day] = (byDay[day] || 0) + 1;
-    }
 
     const cs = (l.metadata?.ai_call_status || l.ai_call_status || '').toLowerCase();
     if (cs.includes('completed') || cs.includes('done')) callsDone += 1;
@@ -57,15 +103,10 @@ export function buildDashboardAnalytics(leads: any[]): DashboardAnalyticsPayload
   const converted = byStatus.confirmed || 0;
   const conversionRate = total > 0 ? Math.round((converted / total) * 100) : 0;
 
-  const days: string[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    days.push(d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }));
-  }
-  const trend = days.map((d) => ({
-    label: d.split(' ')[0],
-    value: byDay[d] || 0,
+  const days = trendDays(range);
+  const trend = days.map((day) => ({
+    label: day.label,
+    value: leads.filter((lead) => trendKey(lead.created_at || lead.timestamp, day.bucket) === day.key).length,
     color: '#e24b1b',
   }));
 

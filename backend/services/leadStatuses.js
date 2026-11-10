@@ -28,6 +28,7 @@ function boardFromSettings(settings) {
       color: COLORS.includes(row.color) ? row.color : 'slate',
       position: Number.isFinite(Number(row.position)) ? Number(row.position) : index,
       archived: Boolean(row.archived),
+      is_default: Boolean(row.is_default) && !row.archived,
     }))
     .filter((row) => row.key)
     .sort((a, b) => a.position - b.position);
@@ -54,10 +55,14 @@ function validateBoard(input) {
       color: COLORS.includes(row.color) ? row.color : 'slate',
       position: i,
       archived: Boolean(row.archived),
+      is_default: Boolean(row.is_default) && !row.archived,
     });
   }
   const active = statuses.filter((row) => !row.archived);
   if (active.length === 0) return { ok: false, error: 'At least one status must stay active' };
+  const defaults = active.filter((row) => row.is_default);
+  if (defaults.length > 1) return { ok: false, error: 'Only one status can be the default' };
+  if (defaults.length === 0) active[0].is_default = true;
   return { ok: true, statuses };
 }
 

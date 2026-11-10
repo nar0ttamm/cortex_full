@@ -2,11 +2,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { createLeadInSupabase } from '@/lib/supabase-client';
+import { getBackendAuthHeaders } from '@/lib/backendAuth.server';
 
 export async function POST(request: NextRequest) {
   try {
-    const { tenantId } = await requireAuth();
+    await requireAuth();
     const formData = await request.formData();
     const file = formData.get('file') as File;
 
@@ -15,55 +15,26 @@ export async function POST(request: NextRequest) {
     }
 
     const text = await file.text();
-    const lines = text.split('\n').filter(line => line.trim());
-
-    if (lines.length < 2) {
-      return NextResponse.json({ error: 'File must contain a header row and at least one data row' }, { status: 400 });
-    }
-
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-    const rows = lines.slice(1).map(line => {
-      const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-      const row: any = {};
-      headers.forEach((header, index) => {
-        row[header.toLowerCase()] = values[index] || '';
-      });
-      return row;
+    const base = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '';
+    if (!base) return NextResponse.json({ error: 'API URL is not configured' }, { status: 500 });
+    const response = await fetch(`${base}/v1/leads/import`, {
+      method: 'POST',
+      headers: { ...(await getBackendAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csv: text, commit: true }),
     });
-
-    const leads = rows.map((row: any) => ({
-      name: row.name || row['full name'] || '',
-      phone: row.phone || row.mobile || '',
-      email: row.email || '',
-      inquiry: row.inquiry || row.message || row.query || '',
-      source: row.source || 'CSV Import',
-      project_id: row.project_id || row.projectid || undefined,
-    }));
-
-    const validLeads = leads.filter(lead => lead.name && lead.phone);
-
-    if (validLeads.length === 0) {
-      return NextResponse.json({ error: 'No valid leads found (name and phone are required)' }, { status: 400 });
-    }
-
-    let imported = 0;
-    const errors: string[] = [];
-
-    for (const lead of validLeads) {
-      try {
-        await createLeadInSupabase(lead, tenantId);
-        imported++;
-      } catch (err: any) {
-        errors.push(`${lead.name} (${lead.phone}): ${err.message}`);
-      }
-    }
-
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return NextResponse.json(data, { status: response.status });
     return NextResponse.json({
       success: true,
-      imported,
-      skipped: validLeads.length - imported,
-      total: leads.length,
-      errors: errors.length > 0 ? errors : undefined,
+      imported: data.imported || 0,
+      skipped: (data.skipped_existing || 0) + (data.file_duplicates || []).length + (data.invalid || []).length,
+      total: (data.imported || 0) + (data.skipped_existing || 0) + (data.invalid || []).length + (data.file_duplicates || []).length,
+      errors: [
+        ...(data.invalid || []).map((row: { row: number; error: string }) => `Row ${row.row}: ${row.error}`),
+        ...(data.file_duplicates || []).map((row: { row: number; error: string }) => `Row ${row.row}: ${row.error}`),
+        ...(data.existing || []).map((row: { row: number; name: string; phone: string }) => `Row ${row.row}: ${row.name} (${row.phone}) already exists and was not merged`),
+        ...(data.parse_errors || []).map((row: { row: number; error: string }) => `Row ${row.row}: ${row.error}`),
+      ],
     });
   } catch (error: any) {
     if (error.message === 'Authentication required') {

@@ -1,11 +1,58 @@
 // API route for dashboard statistics — Supabase + calls table (multitenant)
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { getLeadsFromSupabase } from '@/lib/supabase-client';
 import { buildDashboardAnalytics } from '@/lib/analyticsFromLeads';
 import { DashboardStats, type DashboardAnalyticsPayload } from '@/types';
 import { getBackendAuthHeaders } from '@/lib/backendAuth.server';
+
+async function fetchDashboard(from: string, to: string) {
+  const base = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '';
+  if (!base) return null;
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${base}/v1/analytics/dashboard?${params.toString()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: await getBackendAuthHeaders(),
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    return await res.json() as {
+      from: string;
+      to: string;
+      leads: {
+        total: number;
+        new: number;
+        assigned: number;
+        unassigned: number;
+        interested: number;
+        not_interested: number;
+        confirmed: number;
+        conversion_rate: number;
+      };
+      calls: { made: number; completed: number; outcomes: { outcome: string; count: number }[] };
+      appointments: number;
+      sources: { source: string; count: number }[];
+      team: { name: string; leads: number }[];
+    };
+  } catch {
+    return null;
+  }
+}
+
+function inRange(value: string | undefined, from: string, to: string) {
+  if (!value) return false;
+  const time = new Date(value).getTime();
+  const start = new Date(`${from}T00:00:00+05:30`).getTime();
+  const end = new Date(`${to}T00:00:00+05:30`).getTime() + 86400000;
+  return time >= start && time < end;
+}
 
 async function fetchConversion(tenantId: string): Promise<DashboardAnalyticsPayload['conversion']> {
   const base = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '';
@@ -47,46 +94,40 @@ async function fetchCallsActiveCount(tenantId: string): Promise<number> {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const { tenantId } = await requireAuth();
-    const [leads, activeCallsFromDb, conversion] = await Promise.all([
+    const from = request.nextUrl.searchParams.get('from') || '';
+    const to = request.nextUrl.searchParams.get('to') || '';
+    const [leads, activeCallsFromDb, conversion, dashboard] = await Promise.all([
       getLeadsFromSupabase(tenantId),
       fetchCallsActiveCount(tenantId),
       fetchConversion(tenantId),
+      fetchDashboard(from, to),
     ]);
 
-    const totalLeads = leads.length;
-    const activeCalls = activeCallsFromDb;
+    const ranged = dashboard
+      ? leads.filter((lead: { created_at?: string; timestamp?: string }) => inRange(lead.created_at || lead.timestamp, dashboard.from, dashboard.to))
+      : leads;
 
-    const today = new Date().toISOString().split('T')[0];
-    const appointmentsToday = leads.filter(
+    const totalLeads = dashboard?.leads.total ?? ranged.length;
+    const activeCalls = activeCallsFromDb;
+    const appointmentsToday = dashboard?.appointments ?? leads.filter(
       (l: any) =>
         l.appointment_date &&
-        String(l.appointment_date).startsWith(today) &&
+        String(l.appointment_date).startsWith(new Date().toISOString().split('T')[0]) &&
         l.appointment_status === 'Scheduled'
     ).length;
-
-    const interestedLeads = leads.filter(
-      (l: any) =>
-        l.status?.toLowerCase().includes('interested') || l.call_result === 'interested'
+    const interestedLeads = dashboard?.leads.interested ?? ranged.filter(
+      (l: any) => l.status?.toLowerCase().includes('interested') || l.call_result === 'interested'
     ).length;
-
-    const confirmedAppointments = leads.filter((l: any) => l.appointment_status === 'Scheduled').length;
-
-    const conversionRate =
-      totalLeads > 0
-        ? parseFloat(((confirmedAppointments / totalLeads) * 100).toFixed(1))
-        : 0;
-
-    const newLeads = leads.filter((l: any) => {
-      const status = (l.status || '').toLowerCase();
-      return status === 'new';
-    }).length;
-
-    const notInterestedLeads = leads.filter(
-      (l: any) =>
-        l.status?.toLowerCase().includes('not_interested') || l.call_result === 'not_interested'
+    const confirmedAppointments = dashboard?.leads.confirmed ?? ranged.filter((l: any) => l.appointment_status === 'Scheduled').length;
+    const conversionRate = dashboard?.leads.conversion_rate ?? (totalLeads > 0
+      ? parseFloat(((confirmedAppointments / totalLeads) * 100).toFixed(1))
+      : 0);
+    const newLeads = dashboard?.leads.new ?? ranged.filter((l: any) => (l.status || '').toLowerCase() === 'new').length;
+    const notInterestedLeads = dashboard?.leads.not_interested ?? ranged.filter(
+      (l: any) => l.status?.toLowerCase().includes('not_interested') || l.call_result === 'not_interested'
     ).length;
 
     const stats: DashboardStats = {
@@ -98,12 +139,33 @@ export async function GET() {
       interestedLeads,
       notInterestedLeads,
       confirmedAppointments,
+      assignedLeads: dashboard?.leads.assigned,
+      unassignedLeads: dashboard?.leads.unassigned,
+      callsMade: dashboard?.calls.made,
+      callsCompleted: dashboard?.calls.completed,
+      from: dashboard?.from,
+      to: dashboard?.to,
+      team: dashboard?.team,
     };
 
     const analytics: DashboardAnalyticsPayload = {
-      ...buildDashboardAnalytics(leads),
+      ...buildDashboardAnalytics(ranged, dashboard ? { from: dashboard.from, to: dashboard.to } : undefined),
       conversion,
     };
+    if (dashboard && dashboard.calls.outcomes.length > 0) {
+      analytics.callChart = dashboard.calls.outcomes.map((row) => ({
+        label: row.outcome,
+        value: row.count,
+        color: '#1a6b63',
+      }));
+    }
+    if (dashboard && dashboard.sources.length > 0) {
+      analytics.sourceChart = dashboard.sources.map((row, index) => ({
+        label: row.source,
+        value: row.count,
+        color: ['#e24b1b', '#1a6b63', '#c4841d', '#f06a3a', '#6b645b', '#3d9d93'][index % 6],
+      }));
+    }
 
     return NextResponse.json({ stats, analytics });
   } catch (error: unknown) {

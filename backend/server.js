@@ -82,6 +82,7 @@ app.get('/health', async (req, res) => {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/v1', require('./routes/leads'));
+app.use('/v1', require('./routes/dashboard'));
 app.use('/v1', require('./routes/calls'));
 app.use('/v1', require('./routes/appointments'));
 app.use('/v1', require('./routes/credentials'));

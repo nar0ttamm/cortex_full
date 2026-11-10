@@ -83,6 +83,13 @@ export interface DashboardStats {
   interestedLeads: number;
   notInterestedLeads: number;
   confirmedAppointments: number;
+  assignedLeads?: number;
+  unassignedLeads?: number;
+  callsMade?: number;
+  callsCompleted?: number;
+  from?: string;
+  to?: string;
+  team?: { name: string; leads: number }[];
 }
 
 /** Chart series returned with /api/stats (computed server-side) */

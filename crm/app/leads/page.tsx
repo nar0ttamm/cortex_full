@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { AppShell } from '../components/AppShell';
+import { KanbanEditor } from '../components/KanbanEditor';
 import { Lead } from '@/types';
 import { ScheduledCallCountdown } from '@/components/ScheduledCallCountdown';
 import { getEffectiveScheduledCallAt } from '@/lib/scheduledCallDisplay';
@@ -28,10 +29,9 @@ const STATUS_STYLES: Record<string, { color: string; bg: string; border: string;
   slate: { color: 'text-slate-700 dark:text-slate-300', bg: 'bg-slate-100 dark:bg-slate-800', border: 'border-slate-200 dark:border-slate-700', dot: 'bg-slate-500' },
 };
 
-function normalizeKanbanStatus(s: string, columns: { id: string }[]) {
-  const lower = (s || 'new').toLowerCase().replace(/ /g, '_');
-  const found = columns.find(c => c.id === lower);
-  return found ? found.id : columns[0]?.id || 'new';
+function columnIdFor(status: string, columns: { id: string }[]) {
+  const lower = (status || 'new').toLowerCase().replace(/ /g, '_');
+  return columns.some((column) => column.id === lower) ? lower : '__other';
 }
 
 function LeadsPage() {
@@ -45,6 +45,12 @@ function LeadsPage() {
   const searchParams = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [columns, setColumns] = useState(KANBAN_COLUMNS);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [canEditBoard, setCanEditBoard] = useState(false);
+  const [sortBy, setSortBy] = useState<'newest' | 'name' | 'status'>('newest');
+  const [assignmentFilter, setAssignmentFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const [claiming, setClaiming] = useState<string | null>(null);
   const [dragLeadId, setDragLeadId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
@@ -58,6 +64,13 @@ function LeadsPage() {
     if (source) setSourceFilter(source);
     if (q) setSearchTerm(q);
   }, [searchParams]);
+
+  useEffect(() => {
+    fetch('/api/me')
+      .then((response) => response.json())
+      .then((data) => setCanEditBoard(data.role === 'admin' || data.role === 'manager'))
+      .catch(() => setCanEditBoard(false));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,7 +147,7 @@ function LeadsPage() {
 
   useEffect(() => {
     filterLeads();
-  }, [leads, searchTerm, statusFilter, sourceFilter]);
+  }, [leads, searchTerm, statusFilter, sourceFilter, assignmentFilter, sortBy]);
 
   const filterLeads = () => {
     let filtered = [...leads];
@@ -159,12 +172,39 @@ function LeadsPage() {
       filtered = filtered.filter((lead) => (lead.source || '') === sourceFilter);
     }
 
+    if (assignmentFilter === 'unassigned') {
+      filtered = filtered.filter((lead) => !lead.assigned_to);
+    } else if (assignmentFilter === 'assigned') {
+      filtered = filtered.filter((lead) => Boolean(lead.assigned_to));
+    }
+
+    filtered.sort((a, b) => {
+      if (sortBy === 'name') return (a.name || '').localeCompare(b.name || '');
+      if (sortBy === 'status') return (a.status || '').localeCompare(b.status || '');
+      return new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime();
+    });
+
     setFilteredLeads(filtered);
   };
 
+  const claimLead = async (leadId: string) => {
+    setClaiming(leadId);
+    try {
+      const response = await fetch(`/api/leads/${leadId}/claim`, { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Could not claim this lead');
+      await fetchLeads(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not claim this lead');
+    } finally {
+      setClaiming(null);
+    }
+  };
+
   const moveCard = async (leadId: string, newStatus: string) => {
+    if (newStatus === '__other') return;
     const lead = leads.find(l => l.id === leadId);
-    if (!lead || normalizeKanbanStatus(lead.status, columns) === newStatus) return;
+    if (!lead || columnIdFor(lead.status, columns) === newStatus) return;
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
     setUpdating(leadId);
     try {
@@ -242,6 +282,15 @@ function LeadsPage() {
           <span className="hidden sm:inline">Kanban</span>
         </button>
       </div>
+      {canEditBoard && (
+        <button
+          type="button"
+          onClick={() => setEditorOpen(true)}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+        >
+          Configure board
+        </button>
+      )}
       <button
         onClick={() => void fetchLeads(false)}
         disabled={loading}
@@ -266,13 +315,34 @@ function LeadsPage() {
 
   // Kanban view
   if (viewMode === 'kanban') {
-    const grouped = columns.reduce((acc, col) => {
-      acc[col.id] = filteredLeads.filter(l => normalizeKanbanStatus(l.status, columns) === col.id);
+    const board = filteredLeads.some((lead) => columnIdFor(lead.status, columns) === '__other')
+      ? [...columns, { id: '__other', label: 'Other', color: 'text-slate-700 dark:text-slate-300', bg: 'bg-slate-100 dark:bg-slate-800', border: 'border-slate-200 dark:border-slate-700', dot: 'bg-slate-500' }]
+      : columns;
+    const grouped = board.reduce((acc, col) => {
+      acc[col.id] = filteredLeads.filter(l => columnIdFor(l.status, columns) === col.id);
       return acc;
     }, {} as Record<string, Lead[]>);
 
     return (
       <AppShell title="Leads" actions={actions}>
+        <KanbanEditor
+          open={editorOpen}
+          onClose={() => setEditorOpen(false)}
+          onSaved={() => {
+            fetch('/api/crm-data?action=lead-statuses')
+              .then((response) => response.json())
+              .then((data) => {
+                const next = (data.statuses || [])
+                  .filter((status: { archived?: boolean }) => !status.archived)
+                  .map((status: { key: string; label: string; color?: string }) => {
+                    const tone = STATUS_STYLES[status.color || 'slate'] || STATUS_STYLES.slate;
+                    return { id: status.key, label: status.label, color: tone.color, bg: tone.bg, border: tone.border, dot: tone.dot };
+                  });
+                if (next.length > 0) setColumns(next);
+              })
+              .catch(() => undefined);
+          }}
+        />
         <div className="p-4 sm:p-5 h-[calc(100vh-57px)] flex flex-col">
           {/* Quick filter bar */}
           <div className="flex gap-2 mb-3 shrink-0">
@@ -286,7 +356,7 @@ function LeadsPage() {
             <p className="text-xs text-slate-400 flex items-center">{filteredLeads.length} leads</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 overflow-x-auto pb-4 flex-1 min-h-0">
-            {columns.map(col => {
+            {board.map(col => {
               const cards = grouped[col.id] || [];
               const isOver = dragOverCol === col.id;
               return (
@@ -338,6 +408,16 @@ function LeadsPage() {
                           {lead.source && <span className="text-[9px] font-semibold bg-slate-100 dark:bg-slate-700 text-slate-500 px-1.5 py-0.5 rounded-full uppercase">{lead.source}</span>}
                           <span className="text-[9px] text-slate-400 ml-auto">{timeAgo(lead.timestamp)}</span>
                         </div>
+                        {!lead.assigned_to && (
+                          <button
+                            type="button"
+                            onClick={() => lead.id && void claimLead(lead.id)}
+                            disabled={claiming === lead.id}
+                            className="mt-2 text-[10px] font-semibold text-teal-700"
+                          >
+                            {claiming === lead.id ? 'Claiming...' : 'Claim'}
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -350,8 +430,30 @@ function LeadsPage() {
     );
   }
 
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(filteredLeads.length / pageSize));
+  const visibleLeads = filteredLeads.slice((page - 1) * pageSize, page * pageSize);
+
   return (
     <AppShell title="Leads" actions={actions}>
+      <KanbanEditor
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        onSaved={() => {
+          fetch('/api/crm-data?action=lead-statuses')
+            .then((response) => response.json())
+            .then((data) => {
+              const next = (data.statuses || [])
+                .filter((status: { archived?: boolean }) => !status.archived)
+                .map((status: { key: string; label: string; color?: string }) => {
+                  const tone = STATUS_STYLES[status.color || 'slate'] || STATUS_STYLES.slate;
+                  return { id: status.key, label: status.label, color: tone.color, bg: tone.bg, border: tone.border, dot: tone.dot };
+                });
+              if (next.length > 0) setColumns(next);
+            })
+            .catch(() => undefined);
+        }}
+      />
       <div className="p-4 sm:p-6 lg:p-8">
         {/* Filters */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm p-4 sm:p-5 mb-4">
@@ -372,6 +474,16 @@ function LeadsPage() {
               {uniqueStatuses.map((status) => (
                 <option key={status} value={status}>{status}</option>
               ))}
+            </select>
+            <select value={assignmentFilter} onChange={(event) => setAssignmentFilter(event.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white">
+              <option value="all">All assignments</option>
+              <option value="unassigned">Unassigned</option>
+              <option value="assigned">Assigned</option>
+            </select>
+            <select value={sortBy} onChange={(event) => setSortBy(event.target.value as 'newest' | 'name' | 'status')} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white">
+              <option value="newest">Newest</option>
+              <option value="name">Name</option>
+              <option value="status">Status</option>
             </select>
           </div>
           <p className="mt-3 text-xs text-slate-500">
@@ -395,7 +507,7 @@ function LeadsPage() {
           <>
             {/* Mobile: card list */}
             <div className={`md:hidden space-y-2 transition-opacity ${loading ? 'opacity-60' : ''}`}>
-              {filteredLeads.map((lead, index) => (
+              {visibleLeads.map((lead, index) => (
                 <Link key={lead.id || index} href={`/leads/${lead.id}`}
                   className="block bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/70 dark:border-slate-700 shadow-sm p-4 hover:border-teal-300 dark:hover:border-teal-700 transition-all"
                 >
@@ -453,7 +565,7 @@ function LeadsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                    {filteredLeads.map((lead, index) => (
+                    {visibleLeads.map((lead, index) => (
                       <tr key={lead.id || index} className="hover:bg-slate-50/70 dark:hover:bg-slate-700/30 transition-colors">
                         <td className="px-5 py-3.5">
                           <Link href={`/leads/${lead.id}`} className="group block">
@@ -502,9 +614,16 @@ function LeadsPage() {
                           </span>
                         </td>
                         <td className="px-5 py-3.5">
-                          <Link href={`/leads/${lead.id}`} className="text-xs font-semibold text-teal-600 hover:text-teal-700 transition-colors">
-                            View →
-                          </Link>
+                          <div className="flex items-center gap-3">
+                            {!lead.assigned_to && lead.id && (
+                              <button type="button" onClick={() => void claimLead(lead.id!)} disabled={claiming === lead.id} className="text-xs font-semibold text-slate-600">
+                                {claiming === lead.id ? 'Claiming...' : 'Claim'}
+                              </button>
+                            )}
+                            <Link href={`/leads/${lead.id}`} className="text-xs font-semibold text-teal-600 hover:text-teal-700 transition-colors">
+                              View →
+                            </Link>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -513,6 +632,13 @@ function LeadsPage() {
               </div>
             </div>
           </>
+        )}
+        {filteredLeads.length > pageSize && (
+          <div className="mt-4 flex items-center justify-between text-xs">
+            <button type="button" disabled={page <= 1} onClick={() => setPage((current) => current - 1)} className="px-3 py-2 rounded-xl bg-slate-100 disabled:opacity-40">Previous</button>
+            <span>Page {page} of {pageCount}</span>
+            <button type="button" disabled={page >= pageCount} onClick={() => setPage((current) => current + 1)} className="px-3 py-2 rounded-xl bg-slate-100 disabled:opacity-40">Next</button>
+          </div>
         )}
       </div>
     </AppShell>
