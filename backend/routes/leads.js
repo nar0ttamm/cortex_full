@@ -6,6 +6,8 @@ const { VALID_STATUSES, STATUS_TRANSITIONS, getLeadById, getLeadByPhone, mergeLe
 const { sendLeadEntryNotifications, getAdminContact } = require('../services/notificationService');
 const { enqueueCall } = require('../services/callQueueService');
 const { resolveProject } = require('../services/projectResolver');
+const { seesAllLeads, canViewLead } = require('../services/leadAccess');
+const { isAllowedLeadStatus } = require('../services/leadStatuses');
 const { buildConversionMetrics } = require('../services/conversionAnalytics');
 
 const LEAD_SELECT = `
@@ -123,8 +125,13 @@ router.get('/leads/:tenantId', asyncHandler(async (req, res) => {
   const params = [tenantId];
 
   if (status) {
-    query += ' AND l.status = $2';
+    query += ` AND l.status = $${params.length + 1}`;
     params.push(status);
+  }
+
+  if (!seesAllLeads(req.role)) {
+    query += ` AND (l.assigned_to IS NULL OR l.assigned_to = (SELECT id FROM user_profiles WHERE user_id = $${params.length + 1} AND tenant_id = l.tenant_id LIMIT 1))`;
+    params.push(req.userId);
   }
 
   query += ' ORDER BY l.created_at DESC LIMIT $' + (params.length + 1);
@@ -142,8 +149,13 @@ router.get('/leads/:tenantId/:leadId', asyncHandler(async (req, res) => {
     return res.status(403).json({ error: 'Tenant mismatch' });
   }
   const result = await db.query(
-    `${LEAD_SELECT} WHERE l.tenant_id = $1 AND l.id = $2`,
-    [tenantId, leadId]
+    `${LEAD_SELECT} WHERE l.tenant_id = $1 AND l.id = $2
+       AND (
+         $3::boolean
+         OR l.assigned_to IS NULL
+         OR l.assigned_to = (SELECT id FROM user_profiles WHERE user_id = $4 AND tenant_id = l.tenant_id LIMIT 1)
+       )`,
+    [tenantId, leadId, seesAllLeads(req.role), req.userId || null]
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
   return res.json({ lead: result.rows[0] });
@@ -151,9 +163,19 @@ router.get('/leads/:tenantId/:leadId', asyncHandler(async (req, res) => {
 
 // GET /v1/leads/by-phone/:tenantId/:phone
 router.get('/leads/by-phone/:tenantId/:phone', asyncHandler(async (req, res) => {
-  const { tenantId, phone } = req.params;
+  const tenantId = req.tenantId || req.params.tenantId;
+  const { phone } = req.params;
   const lead = await getLeadByPhone(tenantId, phone);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  if (!seesAllLeads(req.role)) {
+    const profile = await db.query(
+      `SELECT id FROM user_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [req.userId, tenantId]
+    );
+    if (!canViewLead(req.role, lead, profile.rows[0]?.id)) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+  }
   return res.json({ lead });
 }));
 
@@ -166,11 +188,37 @@ router.patch('/leads/:leadId', asyncHandler(async (req, res) => {
   const params = [];
   let i = 1;
 
-  if (status !== undefined) { updates.push(`status = $${i++}`); params.push(status); }
+  if (status !== undefined) {
+    const settingsResult = await db.query('SELECT settings FROM tenants WHERE id = $1', [req.tenantId]);
+    if (!isAllowedLeadStatus(status, settingsResult.rows[0]?.settings)) {
+      return res.status(400).json({ error: 'Unknown lead status' });
+    }
+    updates.push(`status = $${i++}`);
+    params.push(status);
+  }
   if (metadata !== undefined) { updates.push(`metadata = $${i++}`); params.push(JSON.stringify(metadata)); }
   const nextProject = project_id || projectId;
   if (nextProject !== undefined) { updates.push(`project_id = $${i++}`); params.push(nextProject || null); }
   const nextAssignee = assigned_to !== undefined ? assigned_to : assignedTo;
+  if (nextAssignee !== undefined && !seesAllLeads(req.role)) {
+    const profile = await db.query(
+      `SELECT id FROM user_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [req.userId, req.tenantId]
+    );
+    const current = await db.query(
+      `SELECT assigned_to FROM leads WHERE id = $1 AND tenant_id = $2`,
+      [leadId, req.tenantId]
+    );
+    if (current.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
+    const profileId = profile.rows[0]?.id || null;
+    const owner = current.rows[0].assigned_to;
+    const self = profileId && String(nextAssignee) === String(profileId);
+    const claiming = !owner && self;
+    const keeping = owner && self && String(owner) === String(profileId);
+    if (!claiming && !keeping) {
+      return res.status(403).json({ error: 'Only a manager can assign this lead' });
+    }
+  }
   if (nextAssignee !== undefined) { updates.push(`assigned_to = $${i++}`); params.push(nextAssignee || null); }
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
 
@@ -186,6 +234,19 @@ router.patch('/leads/:leadId', asyncHandler(async (req, res) => {
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Lead not found' });
   const updated = result.rows[0];
+
+  if (nextAssignee !== undefined) {
+    await db.query(
+      `UPDATE leads
+       SET metadata = jsonb_set(
+         COALESCE(metadata, '{}'::jsonb),
+         '{assignment_history}',
+         COALESCE(metadata->'assignment_history', '[]'::jsonb) || $1::jsonb
+       )
+       WHERE id = $2 AND tenant_id = $3`,
+      [JSON.stringify([{ to: nextAssignee || null, by: req.userId || null, at: new Date().toISOString() }]), leadId, req.tenantId]
+    ).catch((err) => console.warn('[leads] assignment history skipped:', err.message));
+  }
 
   if (nextProject && updated.metadata?.needs_project_assignment) {
     const scheduledCallAt = new Date(Date.now() + 60 * 1000).toISOString();

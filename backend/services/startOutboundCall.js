@@ -11,6 +11,7 @@ const { selectProducts } = require('./productSelector');
 const { extractAndStoreIntent } = require('./leadIntentExtractor');
 const { trackUsage } = require('./usageTracker');
 const { resolveProject } = require('./projectResolver');
+const { callConsentDecision } = require('./callQueueService');
 
 class StartCallError extends Error {
   constructor(status, message, extra = {}) {
@@ -39,6 +40,10 @@ async function startOutboundCall({ tenantId, leadId, isDemo = false }) {
     throw new StartCallError(404, 'Lead not found');
   }
   const lead = leadResult.rows[0];
+  const consent = await callConsentDecision(tenantId, leadId);
+  if (!consent.allowed) {
+    throw new StartCallError(403, `Call blocked: ${consent.reason}`);
+  }
 
   if (!lead.project_id) {
     const resolved = await resolveProject({ tenantId, projectId: null });

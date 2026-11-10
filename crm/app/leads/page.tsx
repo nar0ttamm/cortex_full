@@ -18,10 +18,20 @@ const KANBAN_COLUMNS = [
   { id: 'not_interested',        label: 'Lost',         color: 'text-red-700 dark:text-red-400',      bg: 'bg-red-50 dark:bg-red-900/20',       border: 'border-red-200 dark:border-red-800',     dot: 'bg-red-500' },
 ];
 
-function normalizeKanbanStatus(s: string) {
+const STATUS_STYLES: Record<string, { color: string; bg: string; border: string; dot: string }> = {
+  blue: KANBAN_COLUMNS[0],
+  teal: KANBAN_COLUMNS[1],
+  violet: KANBAN_COLUMNS[2],
+  green: KANBAN_COLUMNS[3],
+  red: KANBAN_COLUMNS[4],
+  amber: { color: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20', border: 'border-amber-200 dark:border-amber-800', dot: 'bg-amber-500' },
+  slate: { color: 'text-slate-700 dark:text-slate-300', bg: 'bg-slate-100 dark:bg-slate-800', border: 'border-slate-200 dark:border-slate-700', dot: 'bg-slate-500' },
+};
+
+function normalizeKanbanStatus(s: string, columns: { id: string }[]) {
   const lower = (s || 'new').toLowerCase().replace(/ /g, '_');
-  const found = KANBAN_COLUMNS.find(c => c.id === lower);
-  return found ? found.id : 'new';
+  const found = columns.find(c => c.id === lower);
+  return found ? found.id : columns[0]?.id || 'new';
 }
 
 function LeadsPage() {
@@ -34,6 +44,7 @@ function LeadsPage() {
   const [sourceFilter, setSourceFilter] = useState('all');
   const searchParams = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [columns, setColumns] = useState(KANBAN_COLUMNS);
   const [dragLeadId, setDragLeadId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
@@ -47,6 +58,27 @@ function LeadsPage() {
     if (source) setSourceFilter(source);
     if (q) setSearchTerm(q);
   }, [searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch('/api/crm-data?action=lead-statuses');
+        if (!response.ok) return;
+        const data = await response.json();
+        const next = (data.statuses || [])
+          .filter((status: { archived?: boolean }) => !status.archived)
+          .map((status: { key: string; label: string; color?: string }) => {
+            const tone = STATUS_STYLES[status.color || 'slate'] || STATUS_STYLES.slate;
+            return { id: status.key, label: status.label, color: tone.color, bg: tone.bg, border: tone.border, dot: tone.dot };
+          });
+        if (!cancelled && next.length > 0) setColumns(next);
+      } catch {
+        // Keep the default board when the status API is unavailable.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const fetchLeads = useCallback(async (silent = false) => {
     try {
@@ -132,7 +164,7 @@ function LeadsPage() {
 
   const moveCard = async (leadId: string, newStatus: string) => {
     const lead = leads.find(l => l.id === leadId);
-    if (!lead || normalizeKanbanStatus(lead.status) === newStatus) return;
+    if (!lead || normalizeKanbanStatus(lead.status, columns) === newStatus) return;
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
     setUpdating(leadId);
     try {
@@ -234,8 +266,8 @@ function LeadsPage() {
 
   // Kanban view
   if (viewMode === 'kanban') {
-    const grouped = KANBAN_COLUMNS.reduce((acc, col) => {
-      acc[col.id] = filteredLeads.filter(l => normalizeKanbanStatus(l.status) === col.id);
+    const grouped = columns.reduce((acc, col) => {
+      acc[col.id] = filteredLeads.filter(l => normalizeKanbanStatus(l.status, columns) === col.id);
       return acc;
     }, {} as Record<string, Lead[]>);
 
@@ -254,7 +286,7 @@ function LeadsPage() {
             <p className="text-xs text-slate-400 flex items-center">{filteredLeads.length} leads</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 overflow-x-auto pb-4 flex-1 min-h-0">
-            {KANBAN_COLUMNS.map(col => {
+            {columns.map(col => {
               const cards = grouped[col.id] || [];
               const isOver = dragOverCol === col.id;
               return (

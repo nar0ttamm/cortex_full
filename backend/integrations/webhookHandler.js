@@ -23,7 +23,7 @@ async function verifyWebhookSecret(tenantId, integrationKey, req) {
   if (result.rows.length === 0) return false;
 
   const secret = result.rows[0].webhook_secret;
-  if (!secret) return true; // No secret configured — allow all
+  if (!secret) return false;
 
   const authHeader = req.headers['authorization'] || '';
   const signature = req.headers['x-hub-signature-256'] ||
@@ -32,14 +32,16 @@ async function verifyWebhookSecret(tenantId, integrationKey, req) {
 
   // Bearer token check
   if (authHeader.startsWith('Bearer ')) {
-    return authHeader.slice(7) === secret;
+    const { timingSafeEqualText } = require('../services/comms/webhookAuth');
+    return timingSafeEqualText(authHeader.slice(7), secret);
   }
 
   // HMAC SHA-256 check (Meta, GitHub style)
   if (signature.startsWith('sha256=')) {
     const rawBody = req.rawBody || JSON.stringify(req.body);
     const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+    const { timingSafeEqualText } = require('../services/comms/webhookAuth');
+    return timingSafeEqualText(signature, expected);
   }
 
   return false;

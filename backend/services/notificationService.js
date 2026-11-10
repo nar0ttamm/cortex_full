@@ -1,6 +1,6 @@
 const db = require('../db');
 const config = require('../config');
-const { getCredentials } = require('./credentialService');
+const { sendTransactionalEmail, sendTransactionalWhatsApp } = require('./comms/dispatcher');
 
 /** Human-readable delay for WhatsApp/email copy (matches CALL_DELAY_SECONDS). */
 function scheduledCallDelayPhrase() {
@@ -23,115 +23,47 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-async function resolveServiceCredentials(tenantId, service) {
-  try {
-    return await getCredentials(tenantId, service);
-  } catch (err) {
-    if (service === 'resend' && process.env.RESEND_API_KEY) {
-      return {
-        api_key: process.env.RESEND_API_KEY,
-        from_email: process.env.RESEND_FROM_EMAIL || 'noreply@cortexflow.in',
-        reply_to_email: process.env.RESEND_REPLY_TO || null,
-      };
-    }
-    if (service === 'aisensy' && process.env.AISENSY_API_KEY) {
-      let campaigns = {};
-      try {
-        campaigns = JSON.parse(process.env.AISENSY_CAMPAIGNS || '{}');
-      } catch {
-        campaigns = {};
-      }
-      return { api_key: process.env.AISENSY_API_KEY, campaigns };
-    }
-    throw err;
-  }
+function stampProvider(entries, results) {
+  return entries.map((entry, index) => {
+    const value = results[index]?.value || {};
+    return {
+      ...entry,
+      provider: value.provider || null,
+      provider_request_id: value.providerRequestId || null,
+      crqid: value.crqid || null,
+    };
+  });
 }
 
-async function sendEmail({ tenantId, to, subject, html }) {
-  if (!to) return { skipped: true, reason: 'no recipient' };
-
-  const creds = await resolveServiceCredentials(tenantId, 'resend');
-  const fromEmail  = creds.from_email   || 'noreply@cortexflow.ai';
-  // reply_to_email routes replies through Resend Inbound so we can log them
-  const replyTo    = creds.reply_to_email || null;
-
-  const payload = { from: fromEmail, to, subject, html };
-  if (replyTo) payload.reply_to = replyTo;
-
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${creds.api_key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Resend error: ${err.message || res.statusText}`);
-  }
-
-  return res.json();
+function notifyStatus(result) {
+  if (!result) return 'skipped';
+  if (result.status === 'rejected') return 'failed';
+  if (result.value?.skipped) return 'skipped';
+  if (result.value?.accepted) return 'accepted';
+  return 'failed';
 }
 
-/**
- * Send a WhatsApp message via AiSensy (Official WhatsApp Business API).
- *
- * AiSensy is template-based: you cannot send free-form text outside the 24h
- * session window. Each message type maps to a pre-approved template wired into
- * a "Live" API Campaign in the AiSensy dashboard.
- *
- * Credentials shape (service = 'aisensy'):
- *   {
- *     "api_key": "<dashboard API key>",
- *     "sender":  "+918097250202",          // informational only
- *     "campaigns": {                          // logical key -> live campaign name
- *       "lead_welcome": "...", "admin_new_lead": "...",
- *       "appt_booked_lead": "...", "appt_booked_admin": "...",
- *       "callback_lead": "...", "callback_admin": "...",
- *       "appointment_reminder": "...", "demo_welcome": "..."
- *     }
- *   }
- *
- * @param {string}   campaignKey   logical key resolved against creds.campaigns
- * @param {string[]} templateParams ordered values for the template's {{1}},{{2}}...
- */
-async function sendWhatsApp({ tenantId, to, campaignKey, templateParams = [], userName }) {
-  if (!to) return { skipped: true, reason: 'no recipient' };
-  if (!campaignKey) return { skipped: true, reason: 'no campaign' };
-
-  let creds;
-  try {
-    creds = await resolveServiceCredentials(tenantId, 'aisensy');
-  } catch {
-    return { skipped: true, reason: 'aisensy not configured' };
-  }
-
-  const apiKey = creds.api_key;
-  // Allow either a mapping in creds.campaigns or a raw campaign name as the key.
-  const campaignName = creds.campaigns?.[campaignKey] || campaignKey;
-  if (!apiKey || !campaignName) return { skipped: true, reason: 'aisensy not configured' };
-
-  const res = await fetch('https://backend.aisensy.com/campaign/t1/api/v2', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      apiKey,
-      campaignName,
-      destination: to,
-      userName: userName || 'Customer',
-      templateParams: templateParams.map((p) => String(p ?? '')),
-      source: 'cortexflow-crm',
-    }),
+async function sendEmail({ tenantId, to, toName, templateKey, variables, leadId, enforceConsent = false }) {
+  return sendTransactionalEmail({
+    tenantId,
+    to,
+    toName,
+    templateKey,
+    variables,
+    leadId,
+    enforceConsent,
   });
+}
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`AiSensy error: ${err.errorMessage || err.message || res.statusText}`);
-  }
-
-  return res.json();
+async function sendWhatsApp({ tenantId, to, campaignKey, templateParams = [], leadId, enforceConsent = false }) {
+  return sendTransactionalWhatsApp({
+    tenantId,
+    to,
+    templateKey: campaignKey,
+    templateParams,
+    leadId,
+    enforceConsent,
+  });
 }
 
 /**
@@ -169,27 +101,59 @@ async function sendLeadEntryNotifications({ tenantId, lead, adminEmail, adminPho
   const leadWaBody = `Hi ${leadName}! 👋 Thank you for your interest. Our AI assistant will call you within the next ${delayPhrase} to learn more about your requirements. Please keep your phone available.`;
 
   const tasks = [
-    sendEmail({ tenantId, to: adminEmail, subject: `New Lead: ${leadName}`, html: adminEmailHtml }),
-    sendWhatsApp({ tenantId, to: adminPhone, campaignKey: 'admin_new_lead', userName: 'Admin', templateParams: [leadName, leadPhone, leadInquiry, delayPhrase] }),
+    sendEmail({
+      tenantId,
+      to: adminEmail,
+      toName: 'Admin',
+      templateKey: 'lead_admin',
+      variables: {
+        name: lead.name || 'New Lead',
+        phone: lead.phone || '',
+        email: lead.email || '',
+        inquiry: lead.inquiry || '',
+        source: lead.source || '',
+      },
+    }),
+    sendWhatsApp({
+      tenantId,
+      to: adminPhone,
+      campaignKey: 'admin_new_lead',
+      templateParams: [lead.name || 'New Lead', lead.phone || '', lead.inquiry || '', delayPhrase],
+    }),
   ];
 
   if (leadEmail) {
-    tasks.push(sendEmail({ tenantId, to: leadEmail, subject: 'Thank you for your inquiry!', html: leadEmailHtml }));
+    tasks.push(sendEmail({
+      tenantId,
+      to: leadEmail,
+      toName: lead.name,
+      templateKey: 'lead_thanks',
+      variables: { name: lead.name || 'there', delay: delayPhrase },
+      leadId: lead.id,
+      enforceConsent: true,
+    }));
   }
 
   if (leadPhone) {
-    tasks.push(sendWhatsApp({ tenantId, to: leadPhone, campaignKey: 'lead_welcome', userName: leadName, templateParams: [leadName, delayPhrase] }));
+    tasks.push(sendWhatsApp({
+      tenantId,
+      to: leadPhone,
+      campaignKey: 'lead_welcome',
+      templateParams: [lead.name || 'there', delayPhrase],
+      leadId: lead.id,
+      enforceConsent: true,
+    }));
   }
 
   const results = await Promise.allSettled(tasks);
 
   // Log all sends (success or fail) to lead metadata for the Communications page
   const logEntries = [
-    { type: 'email',    direction: 'to_admin', subject: `New Lead: ${leadName}`,         status: results[0].status },
-    { type: 'whatsapp', direction: 'to_admin', message: adminWaBody.slice(0, 120),        status: results[1].status },
+    { type: 'email',    direction: 'to_admin', subject: `New Lead: ${leadName}`,         status: notifyStatus(results[0]) },
+    { type: 'whatsapp', direction: 'to_admin', message: adminWaBody.slice(0, 120),        status: notifyStatus(results[1]) },
   ];
-  if (leadEmail)  logEntries.push({ type: 'email',    direction: 'to_lead', subject: 'Thank you for your inquiry!', status: results[2]?.status || 'skipped' });
-  if (leadPhone)  logEntries.push({ type: 'whatsapp', direction: 'to_lead', message: leadWaBody.slice(0, 120),      status: results[leadEmail ? 3 : 2]?.status || 'skipped' });
+  if (leadEmail)  logEntries.push({ type: 'email',    direction: 'to_lead', subject: 'Thank you for your inquiry!', status: notifyStatus(results[2]) });
+  if (leadPhone)  logEntries.push({ type: 'whatsapp', direction: 'to_lead', message: leadWaBody.slice(0, 120),      status: notifyStatus(results[leadEmail ? 3 : 2]) });
 
   results.forEach((r, i) => {
     if (r.status === 'rejected') {
@@ -199,7 +163,7 @@ async function sendLeadEntryNotifications({ tenantId, lead, adminEmail, adminPho
 
   // Persist all entries in a single atomic write to avoid race conditions
   if (lead.id) {
-    logCommunications(lead.id, logEntries).catch(() => {});
+    logCommunications(lead.id, stampProvider(logEntries, results)).catch(() => {});
   }
 }
 
@@ -231,11 +195,16 @@ async function logCommunications(leadId, entries) {
   // tenant_id is derived from the lead so callers don't need to pass it.
   try {
     await db.query(
-      `INSERT INTO communications (tenant_id, lead_id, channel, direction, subject, message, status, created_at)
+      `INSERT INTO communications (tenant_id, lead_id, channel, direction, subject, message, status, provider, metadata, created_at)
        SELECT l.tenant_id, l.id,
               COALESCE(e->>'type', 'unknown'),
               COALESCE(e->>'direction', 'unknown'),
               e->>'subject', e->>'message', e->>'status',
+              NULLIF(e->>'provider', ''),
+              jsonb_strip_nulls(jsonb_build_object(
+                'provider_request_id', e->>'provider_request_id',
+                'crqid', e->>'crqid'
+              )),
               COALESCE((e->>'timestamp')::timestamptz, now())
        FROM leads l
        CROSS JOIN LATERAL jsonb_array_elements($1::jsonb) e
@@ -356,11 +325,28 @@ async function sendAppointmentBookedNotifications({ tenantId, lead, appointmentI
   `;
 
   const tasks = [
-    sendWhatsApp({ tenantId, to: adminPhone, campaignKey: 'appt_booked_admin', userName: 'Admin', templateParams: [leadName, leadPhone, dateLabel] }),
-    sendEmail({ tenantId, to: adminEmail, subject: `📅 Appointment Booked – ${leadName}`, html: adminEmailHtml }),
+    sendWhatsApp({ tenantId, to: adminPhone, campaignKey: 'appt_booked_admin', templateParams: [lead.name || 'Lead', lead.phone || '', dateLabel] }),
+    sendEmail({
+      tenantId,
+      to: adminEmail,
+      toName: 'Admin',
+      templateKey: 'appt_booked_admin',
+      variables: { name: lead.name || 'Lead', phone: lead.phone || '', email: lead.email || '', when: dateLabel },
+    }),
   ];
-  if (leadPhone) tasks.push(sendWhatsApp({ tenantId, to: leadPhone, campaignKey: 'appt_booked_lead', userName: leadName, templateParams: [leadName, dateLabel] }));
-  if (leadEmail) tasks.push(sendEmail({ tenantId, to: leadEmail, subject: 'Your Appointment is Confirmed!', html: leadEmailHtml }));
+  if (leadPhone) {
+    tasks.push(sendWhatsApp({
+      tenantId, to: leadPhone, campaignKey: 'appt_booked_lead', templateParams: [lead.name || 'there', dateLabel],
+      leadId: lead.id, enforceConsent: true,
+    }));
+  }
+  if (leadEmail) {
+    tasks.push(sendEmail({
+      tenantId, to: leadEmail, toName: lead.name, templateKey: 'appt_booked_lead',
+      variables: { name: lead.name || 'there', when: dateLabel },
+      leadId: lead.id, enforceConsent: true,
+    }));
+  }
 
   const results = await Promise.allSettled(tasks);
   results.forEach((r, i) => {
@@ -368,13 +354,13 @@ async function sendAppointmentBookedNotifications({ tenantId, lead, appointmentI
   });
 
   const logEntries = [
-    { type: 'whatsapp', direction: 'to_admin', message: adminWaBody.slice(0, 120), status: results[0].status },
-    { type: 'email',    direction: 'to_admin', subject: `Appointment Booked – ${leadName}`, status: results[1].status },
+    { type: 'whatsapp', direction: 'to_admin', message: adminWaBody.slice(0, 120), status: notifyStatus(results[0]) },
+    { type: 'email',    direction: 'to_admin', subject: `Appointment Booked – ${leadName}`, status: notifyStatus(results[1]) },
   ];
-  if (leadPhone) logEntries.push({ type: 'whatsapp', direction: 'to_lead', message: leadWaBody.slice(0, 120), status: results[2]?.status || 'skipped' });
-  if (leadEmail) logEntries.push({ type: 'email',    direction: 'to_lead', subject: 'Appointment Confirmed', status: results[leadPhone ? 3 : 2]?.status || 'skipped' });
+  if (leadPhone) logEntries.push({ type: 'whatsapp', direction: 'to_lead', message: leadWaBody.slice(0, 120), status: notifyStatus(results[2]) });
+  if (leadEmail) logEntries.push({ type: 'email',    direction: 'to_lead', subject: 'Appointment Confirmed', status: notifyStatus(results[leadPhone ? 3 : 2]) });
 
-  if (lead.id) logCommunications(lead.id, logEntries).catch(() => {});
+  if (lead.id) logCommunications(lead.id, stampProvider(logEntries, results)).catch(() => {});
 }
 
 /**
@@ -389,8 +375,13 @@ async function sendCallbackNotifications({ tenantId, lead }) {
   const adminWaBody = `🔔 Callback Requested!\nLead: ${leadName}\nPhone: ${leadPhone}\n\nThey asked to be called back. Please follow up at your earliest convenience.`;
   const leadWaBody  = `Hi ${leadName}! 👋 We noted that you'd like a callback. Our team will reach out to you shortly. Thank you for your patience!`;
 
-  const tasks = [sendWhatsApp({ tenantId, to: adminPhone, campaignKey: 'callback_admin', userName: 'Admin', templateParams: [leadName, leadPhone] })];
-  if (leadPhone) tasks.push(sendWhatsApp({ tenantId, to: leadPhone, campaignKey: 'callback_lead', userName: leadName, templateParams: [leadName] }));
+  const tasks = [sendWhatsApp({ tenantId, to: adminPhone, campaignKey: 'callback_admin', templateParams: [lead.name || 'Lead', lead.phone || ''] })];
+  if (leadPhone) {
+    tasks.push(sendWhatsApp({
+      tenantId, to: leadPhone, campaignKey: 'callback_lead', templateParams: [lead.name || 'there'],
+      leadId: lead.id, enforceConsent: true,
+    }));
+  }
 
   const results = await Promise.allSettled(tasks);
   results.forEach((r, i) => {
@@ -398,11 +389,11 @@ async function sendCallbackNotifications({ tenantId, lead }) {
   });
 
   const logEntries = [
-    { type: 'whatsapp', direction: 'to_admin', message: adminWaBody.slice(0, 120), status: results[0].status },
+    { type: 'whatsapp', direction: 'to_admin', message: adminWaBody.slice(0, 120), status: notifyStatus(results[0]) },
   ];
-  if (leadPhone) logEntries.push({ type: 'whatsapp', direction: 'to_lead', message: leadWaBody.slice(0, 120), status: results[1]?.status || 'skipped' });
+  if (leadPhone) logEntries.push({ type: 'whatsapp', direction: 'to_lead', message: leadWaBody.slice(0, 120), status: notifyStatus(results[1]) });
 
-  if (lead.id) logCommunications(lead.id, logEntries).catch(() => {});
+  if (lead.id) logCommunications(lead.id, stampProvider(logEntries, results)).catch(() => {});
 }
 
 /**
@@ -416,7 +407,14 @@ async function sendAppointmentReminder({ tenantId, lead, hoursUntil }) {
 
   const body = `⏰ Reminder: Hi ${lead.name}, your appointment is in ${timeLabel} — at ${appointmentDate}. Please be prepared!`;
 
-  const result = await sendWhatsApp({ tenantId, to: lead.phone, campaignKey: 'appointment_reminder', userName: lead.name, templateParams: [lead.name, timeLabel, appointmentDate] });
+  const result = await sendWhatsApp({
+    tenantId,
+    to: lead.phone,
+    campaignKey: 'appointment_reminder',
+    templateParams: [lead.name, timeLabel, appointmentDate],
+    leadId: lead.id,
+    enforceConsent: true,
+  });
   logCommunication(lead.id, { type: 'whatsapp', direction: 'to_lead', message: body.slice(0, 120), status: 'fulfilled' }).catch(() => {});
   return result;
 }

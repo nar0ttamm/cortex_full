@@ -1,30 +1,14 @@
 /**
  * POST /v1/email/inbound
  *
- * Receives inbound email webhooks from Resend.
- * Resend sends this when a lead replies to an email you sent them.
- *
- * Set this URL in Resend dashboard → Domains → Inbound → Webhook URL:
- *   https://cortex-backend-api.vercel.app/v1/email/inbound
- *
- * Resend inbound payload shape:
- * {
- *   "type": "email.received",
- *   "data": {
- *     "from": "John Doe <john@example.com>",  or just "john@example.com"
- *     "to": ["reply@yourdomain.com"],
- *     "subject": "Re: Your inquiry",
- *     "text": "plain text reply...",
- *     "html": "<p>html reply</p>",
- *     "headers": [...],
- *     "attachments": []
- *   }
- * }
+ * Inbound email replies. Requires INBOUND_WEBHOOK_SECRET in the x-inbound-secret header.
+ * The response never includes the matched lead. Ambiguous matches across tenants are ignored.
  */
 
 const { Router } = require('express');
 const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
+const config = require('../config');
 const { logCommunication } = require('../services/notificationService');
 
 const router = Router();
@@ -36,43 +20,38 @@ router.get('/email/inbound', (req, res) => {
 
 // POST /v1/email/inbound
 router.post('/email/inbound', asyncHandler(async (req, res) => {
+  const { timingSafeEqualText } = require('../services/comms/webhookAuth');
+  const provided = req.headers['x-inbound-secret'] || '';
+  if (!config.inboundWebhookSecret || !timingSafeEqualText(provided, config.inboundWebhookSecret)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
   const payload = req.body || {};
-
-  // Resend wraps in { type, data } — handle both wrapped and flat formats
   const data = payload.data || payload;
-
-  const rawFrom  = data.from    || data.From    || '';
-  const subject  = data.subject || data.Subject || '(no subject)';
-  const textBody = data.text    || data.Text    || '';
-  const htmlBody = data.html    || data.Html    || '';
-
-  // Extract plain email from "Name <email@example.com>" format
+  const rawFrom = data.from || data.From || '';
+  const subject = data.subject || data.Subject || '(no subject)';
+  const textBody = data.text || data.Text || '';
   const fromEmail = extractEmail(rawFrom);
-  const fromName  = extractName(rawFrom);
+  const fromName = extractName(rawFrom);
 
   if (!fromEmail) {
-    console.warn('[email/inbound] No sender email found in payload');
     return res.status(200).json({ status: 'ignored', reason: 'no from address' });
   }
 
-  // Find lead by their email address
   const leadResult = await db.query(
-    'SELECT id, tenant_id, name FROM leads WHERE email = $1 ORDER BY created_at DESC LIMIT 1',
-    [fromEmail.toLowerCase()]
+    `SELECT id, tenant_id, name FROM leads
+     WHERE lower(email) = $1
+     ORDER BY created_at DESC
+     LIMIT 2`,
+    [fromEmail]
   );
 
-  if (leadResult.rows.length === 0) {
-    console.warn('[email/inbound] No lead found for email:', fromEmail);
-    // Still return 200 so Resend doesn't retry
-    return res.status(200).json({ status: 'ignored', reason: 'lead not found', from: fromEmail });
+  if (leadResult.rows.length !== 1) {
+    return res.status(200).json({ status: 'ignored', reason: leadResult.rows.length === 0 ? 'not found' : 'ambiguous' });
   }
 
   const lead = leadResult.rows[0];
-
-  // Strip quoted reply text to get just the new reply (optional — keep full text for now)
   const preview = stripQuotedText(textBody).slice(0, 500);
-
-  // Log the inbound email to lead's communications_log
   await logCommunication(lead.id, {
     type: 'email',
     direction: 'from_lead',
@@ -82,15 +61,7 @@ router.post('/email/inbound', asyncHandler(async (req, res) => {
     from_name: fromName || lead.name,
   });
 
-  console.log(`[email/inbound] Logged reply from ${fromEmail} → lead ${lead.id} (${lead.name})`);
-
-  return res.status(200).json({
-    status: 'logged',
-    lead_id: lead.id,
-    lead_name: lead.name,
-    from: fromEmail,
-    subject,
-  });
+  return res.status(200).json({ status: 'logged' });
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

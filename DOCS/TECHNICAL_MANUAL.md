@@ -1,6 +1,6 @@
 # CortexFlow — Internal Technical Manual
 
-> For the engineering and operations team. Covers how all services connect, what each file does, and how to debug common issues.
+> Obsolete for implementation. Voice is Telnyx Call Control, Pipecat, Deepgram, OpenAI, and ElevenLabs. Email and WhatsApp are MSG91. Use `DOCS/CORTEXFLOW_IMPLEMENTATION_BASELINE.md` and `DOCS/MSG91_INTEGRATION.md`.
 
 ---
 

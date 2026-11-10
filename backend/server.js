@@ -27,7 +27,12 @@ app.use(cors({
   },
   allowedHeaders: ['Content-Type', 'Authorization', 'x-voice-secret', 'x-admin-token'],
 }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({
+  limit: '1mb',
+  verify: (req, _res, buf) => {
+    req.rawBody = buf;
+  },
+}));
 app.use(express.urlencoded({ extended: true })); // Required for Exotel form-encoded callbacks
 
 app.use((req, res, next) => {
@@ -61,9 +66,17 @@ const db = require('./db');
 app.get('/health', async (req, res) => {
   try {
     await db.query('SELECT 1');
-    res.json({ status: 'healthy', timestamp: new Date().toISOString(), database: 'connected' });
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      database: 'connected',
+      commit: process.env.VERCEL_GIT_COMMIT_SHA || null,
+      automatic_calling: process.env.CALL_QUEUE_ENABLED === 'true' ? 'enabled' : 'disabled',
+      demo_calls: process.env.DEMO_CALLS_ENABLED === 'true' ? 'enabled' : 'disabled',
+    });
   } catch (err) {
-    res.status(500).json({ status: 'unhealthy', timestamp: new Date().toISOString(), database: 'disconnected', error: err.message });
+    console.error('[health] database check failed:', err.message);
+    res.status(500).json({ status: 'unhealthy', timestamp: new Date().toISOString(), database: 'disconnected' });
   }
 });
 
@@ -95,6 +108,7 @@ app.use('/v1', require('./routes/activityLogs'));
 app.use('/v1', require('./routes/googleCalendar'));
 // V2: Meta Lead Ads OAuth + webhook
 app.use('/v1', require('./routes/metaIntegration'));
+app.use('/v1', require('./routes/msg91Webhook'));
 // V3: Agent runtime tools (product search, lead memory, analytics)
 app.use('/v1', require('./routes/callTools'));
 

@@ -20,12 +20,12 @@ module.exports = {
   // Public URL of this backend (used in webhook/callback URLs)
   backendUrl: e(process.env.BACKEND_URL) || 'http://localhost:4000',
 
-  // Default tenant for single-tenant dev mode
-  defaultTenantId: e(process.env.DEFAULT_TENANT_ID) || 'b50750c7-0a91-4cd4-80fa-8921f974a8ec',
+  // Default tenant for the public demo only. Never fall back to a baked-in tenant id.
+  defaultTenantId: e(process.env.DEFAULT_TENANT_ID) || null,
 
-  // Admin notifications
-  adminEmail: e(process.env.ADMIN_EMAIL) || 'cortexflowagent@gmail.com',
-  adminPhone: e(process.env.ADMIN_PHONE) || '+917021433461',
+  // Admin notifications. Tenant settings override these. No personal fallback.
+  adminEmail: e(process.env.ADMIN_EMAIL) || null,
+  adminPhone: e(process.env.ADMIN_PHONE) || null,
 
   // Admin auth token for /v1/admin/* routes
   adminToken: e(process.env.ADMIN_TOKEN) || null,
@@ -50,6 +50,16 @@ module.exports = {
   metaAppId: e(process.env.META_APP_ID),
   metaAppSecret: e(process.env.META_APP_SECRET),
   metaWebhookVerifyToken: e(process.env.META_WEBHOOK_VERIFY_TOKEN),
+
+  inboundWebhookSecret: e(process.env.INBOUND_WEBHOOK_SECRET) || null,
+  msg91AuthKey: e(process.env.MSG91_AUTH_KEY) || null,
+  msg91EmailDomain: e(process.env.MSG91_EMAIL_DOMAIN) || null,
+  msg91EmailFrom: e(process.env.MSG91_EMAIL_FROM) || null,
+  msg91EmailFromName: e(process.env.MSG91_EMAIL_FROM_NAME) || 'CortexFlow',
+  msg91EmailReplyTo: e(process.env.MSG91_EMAIL_REPLY_TO) || null,
+  msg91WhatsappNumber: e(process.env.MSG91_WHATSAPP_INTEGRATED_NUMBER) || null,
+  msg91WhatsappLanguage: e(process.env.MSG91_WHATSAPP_LANGUAGE) || 'en',
+  msg91WebhookSecret: e(process.env.MSG91_WEBHOOK_SECRET) || null,
 
   // Supabase admin (Phase 5 — user creation)
   supabaseUrl: e(process.env.NEXT_PUBLIC_SUPABASE_URL) || e(process.env.SUPABASE_URL),

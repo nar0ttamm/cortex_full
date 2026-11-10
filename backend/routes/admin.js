@@ -3,6 +3,7 @@ const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const { encryptCredentials } = require('../encryption');
 const { requireAdminToken } = require('../middleware/auth');
+const { boardFromSettings, validateBoard } = require('../services/leadStatuses');
 
 const router = Router();
 
@@ -19,6 +20,9 @@ router.get('/tenant/:tenantId', asyncHandler(async (req, res) => {
 
 // PATCH /v1/tenant/:tenantId — update tenant name + settings fields
 router.patch('/tenant/:tenantId', asyncHandler(async (req, res) => {
+  if (req.role !== 'admin' && req.role !== 'manager') {
+    return res.status(403).json({ error: 'Only admins and managers can change tenant settings' });
+  }
   const { tenantId } = req.params;
   const { name, settings } = req.body;
 
@@ -34,6 +38,25 @@ router.patch('/tenant/:tenantId', asyncHandler(async (req, res) => {
     [newName, JSON.stringify(merged), tenantId]
   );
   res.json({ tenant: result.rows[0] });
+}));
+
+router.get('/tenant/:tenantId/lead-statuses', asyncHandler(async (req, res) => {
+  const result = await db.query('SELECT settings FROM tenants WHERE id = $1', [req.params.tenantId]);
+  if (result.rows.length === 0) return res.status(404).json({ error: 'Tenant not found' });
+  return res.json({ statuses: boardFromSettings(result.rows[0].settings) });
+}));
+
+router.put('/tenant/:tenantId/lead-statuses', asyncHandler(async (req, res) => {
+  if (req.role !== 'admin' && req.role !== 'manager') {
+    return res.status(403).json({ error: 'Only admins and managers can change lead statuses' });
+  }
+  const validated = validateBoard(req.body?.statuses);
+  if (!validated.ok) return res.status(400).json({ error: validated.error });
+  const existing = await db.query('SELECT settings FROM tenants WHERE id = $1', [req.params.tenantId]);
+  if (existing.rows.length === 0) return res.status(404).json({ error: 'Tenant not found' });
+  const settings = { ...(existing.rows[0].settings || {}), lead_statuses: validated.statuses };
+  await db.query('UPDATE tenants SET settings = $1::jsonb WHERE id = $2', [JSON.stringify(settings), req.params.tenantId]);
+  return res.json({ statuses: validated.statuses });
 }));
 
 // POST /v1/admin/tenant

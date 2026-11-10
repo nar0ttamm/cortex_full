@@ -1,6 +1,6 @@
 # CortexFlow — Product Overview & Architecture
 
-> Last updated: April 2026 — reflects current live production state.
+> Obsolete for implementation. This file still describes LiveKit, FreeSWITCH, and Twilio. The running system is documented in `DOCS/CORTEXFLOW_IMPLEMENTATION_BASELINE.md` and `DOCS/IMPLEMENTATION_STATUS.md`. Do not build from this file.
 
 ---
 

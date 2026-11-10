@@ -1,6 +1,6 @@
 # CortexFlow — AI Tool Context Document
 
-> Paste this into any AI coding assistant, LLM, or agent at the start of a session to give it accurate context about the product and codebase.
+> Obsolete for implementation. Do not treat LiveKit, FreeSWITCH, Twilio, Resend, or AiSensy as the current stack. Read `DOCS/CORTEXFLOW_IMPLEMENTATION_BASELINE.md` first.
 
 ---
 

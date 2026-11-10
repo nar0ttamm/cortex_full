@@ -34,6 +34,20 @@ router.post('/demo/request', asyncHandler(async (req, res) => {
 
   const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || null;
 
+  try {
+    const recent = await db.query(
+      `SELECT COUNT(*)::int AS n FROM demo_requests
+       WHERE created_at > NOW() - INTERVAL '1 hour'
+         AND (ip_address = $1 OR whatsapp_number = $2)`,
+      [ip, phone]
+    );
+    if ((recent.rows[0]?.n || 0) >= 3) {
+      return res.status(429).json({ error: 'Too many demo requests. Please retry later.' });
+    }
+  } catch (err) {
+    console.warn('[demo] shared rate limit skipped:', err.message);
+  }
+
   // 1. Create demo request record
   const demoResult = await db.query(
     `INSERT INTO demo_requests (name, whatsapp_number, ip_address, status)
@@ -44,11 +58,21 @@ router.post('/demo/request', asyncHandler(async (req, res) => {
   const demoRequestId = demoResult.rows[0].id;
 
   const errors = [];
+  const callsEnabled = process.env.DEMO_CALLS_ENABLED === 'true' && Boolean(config.defaultTenantId);
 
-  // 2. Create temporary lead in demo tenant and trigger AI call
+  // 2. Create temporary lead in demo tenant. Dial only when an operator has enabled demos.
   let callTriggered = false;
   try {
     const tenantId = config.defaultTenantId;
+    if (!tenantId) {
+      await db.query(`UPDATE demo_requests SET status = 'recorded', call_triggered = false WHERE id = $1`, [demoRequestId]);
+      return res.status(201).json({
+        success: true,
+        demo_request_id: demoRequestId,
+        call_triggered: false,
+        message: 'Demo request recorded. Calling is not enabled.',
+      });
+    }
 
     // Create (or reuse) the demo lead. A repeat demo request from the same
     // number must not violate the UNIQUE (tenant_id, phone) constraint — reuse
@@ -80,22 +104,26 @@ router.post('/demo/request', asyncHandler(async (req, res) => {
       `UPDATE demo_requests SET status = 'calling', call_triggered = true WHERE id = $1`,
       [demoRequestId]
     );
-    callTriggered = true;
+    callTriggered = callsEnabled;
 
-    const { startOutboundCall } = require('../services/startOutboundCall');
-    startOutboundCall({ tenantId, leadId, isDemo: true })
-      .then(async () => {
-        await db.query(
-          `UPDATE demo_requests SET call_completed = true, call_completed_at = now(), status = 'completed' WHERE id = $1`,
-          [demoRequestId]
-        );
-      })
-      .catch(async (err) => {
-        await db.query(
-          `UPDATE demo_requests SET status = 'failed', error_log = error_log || $1::jsonb WHERE id = $2`,
-          [JSON.stringify([{ stage: 'call', error: err.message, ts: new Date().toISOString() }]), demoRequestId]
-        );
-      });
+    if (callsEnabled) {
+      const { startOutboundCall } = require('../services/startOutboundCall');
+      startOutboundCall({ tenantId, leadId, isDemo: true })
+        .then(async () => {
+          await db.query(
+            `UPDATE demo_requests SET call_completed = true, call_completed_at = now(), status = 'completed' WHERE id = $1`,
+            [demoRequestId]
+          );
+        })
+        .catch(async (err) => {
+          await db.query(
+            `UPDATE demo_requests SET status = 'failed', error_log = error_log || $1::jsonb WHERE id = $2`,
+            [JSON.stringify([{ stage: 'call', error: err.message, ts: new Date().toISOString() }]), demoRequestId]
+          );
+        });
+    } else {
+      await db.query(`UPDATE demo_requests SET status = 'recorded', call_triggered = false WHERE id = $1`, [demoRequestId]);
+    }
   } catch (err) {
     errors.push({ stage: 'lead_creation', error: err.message });
     await db.query(
@@ -111,7 +139,9 @@ router.post('/demo/request', asyncHandler(async (req, res) => {
     success: true,
     demo_request_id: demoRequestId,
     call_triggered: callTriggered,
-    message: 'Demo request received. Our AI agent will call you shortly.',
+    message: callsEnabled
+      ? 'Demo request received. Our AI agent will call you shortly.'
+      : 'Demo request recorded. Calling is not enabled.',
   });
 }));
 
@@ -139,6 +169,9 @@ router.post('/demo/whatsapp-interaction', asyncHandler(async (req, res) => {
   }
 
   const demo = demoResult.rows[0];
+  if (process.env.DEMO_CALLS_ENABLED !== 'true' || !config.defaultTenantId) {
+    return res.status(403).json({ error: 'Demo calling is not enabled' });
+  }
   const tenantId = config.defaultTenantId;
   const voiceServiceUrl = config.voiceServiceUrl;
 
@@ -188,13 +221,13 @@ async function sendDemoWhatsApp(phone, name, demoRequestId) {
     const tenantId = config.defaultTenantId;
     const { sendWhatsApp } = require('../services/notificationService');
 
-    // AiSensy template-based send (template: demo_welcome -> {{1}} = name)
+    // MSG91 template. Sending is skipped until MSG91_WHATSAPP_TEMPLATES.demo_welcome is set.
     const result = await sendWhatsApp({
       tenantId,
       to: phone,
       campaignKey: 'demo_welcome',
-      userName: name,
       templateParams: [name],
+      enforceConsent: false,
     });
 
     if (result && !result.skipped) {

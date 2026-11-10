@@ -7,8 +7,10 @@
  */
 
 const db = require('../db');
+const { OPEN_STATUSES } = require('./queuePolicy');
+const { channelDecision, normalizeAddress, readConsent, requireGrantFromSettings } = require('./consent');
 
-const MAX_ATTEMPTS_PER_DAY = 2;
+const MAX_ATTEMPTS_PER_DAY = parseInt(process.env.MAX_ATTEMPTS_PER_DAY || '2', 10);
 const MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '3', 10);
 const DEFAULT_RETRY_DELAY_MINUTES = 120; // 2 hours
 
@@ -22,16 +24,69 @@ const DEFAULT_RETRY_DELAY_MINUTES = 120; // 2 hours
  * @param {Date|string|null} [opts.scheduledAt]  null = now
  * @returns {Promise<object>} queue row
  */
-async function enqueueCall({ tenantId, projectId, leadId, priority = 5, scheduledAt = null }) {
-  const scheduled = scheduledAt ? new Date(scheduledAt) : new Date();
-
+async function callConsentDecision(tenantId, leadId) {
   const result = await db.query(
-    `INSERT INTO call_queue (tenant_id, project_id, lead_id, priority, scheduled_at, status, attempt_count)
-     VALUES ($1, $2, $3, $4, $5, 'queued', 0)
-     RETURNING *`,
-    [tenantId, projectId || null, leadId, priority, scheduled.toISOString()]
+    `SELECT l.phone, l.channel_consent, l.metadata, t.settings
+     FROM leads l
+     JOIN tenants t ON t.id = l.tenant_id
+     WHERE l.id = $1 AND l.tenant_id = $2`,
+    [leadId, tenantId]
   );
-  return result.rows[0];
+  const lead = result.rows[0];
+  if (!lead) return { allowed: false, reason: 'lead_not_found' };
+  let suppressed = false;
+  try {
+    const address = normalizeAddress('call', lead.phone);
+    const block = await db.query(
+      `SELECT 1 FROM communication_suppressions
+       WHERE tenant_id = $1 AND channel = 'call' AND address = $2 LIMIT 1`,
+      [tenantId, address]
+    );
+    suppressed = block.rows.length > 0;
+  } catch (err) {
+    if (!String(err.message || '').includes('communication_suppressions')) throw err;
+  }
+  return channelDecision({
+    channel: 'call',
+    consent: readConsent(lead),
+    suppressed,
+    requireGrant: requireGrantFromSettings(lead.settings, 'call'),
+  });
+}
+
+async function enqueueCall({ tenantId, projectId, leadId, priority = 5, scheduledAt = null }) {
+  const decision = await callConsentDecision(tenantId, leadId);
+  if (!decision.allowed) return { skipped: true, reason: decision.reason };
+
+  const open = await db.query(
+    `SELECT * FROM call_queue
+     WHERE tenant_id = $1 AND lead_id = $2 AND status = ANY($3::text[])
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [tenantId, leadId, OPEN_STATUSES]
+  );
+  if (open.rows[0]) return open.rows[0];
+
+  const scheduled = scheduledAt ? new Date(scheduledAt) : new Date();
+  try {
+    const result = await db.query(
+      `INSERT INTO call_queue (tenant_id, project_id, lead_id, priority, scheduled_at, status, attempt_count)
+       VALUES ($1, $2, $3, $4, $5, 'queued', 0)
+       RETURNING *`,
+      [tenantId, projectId || null, leadId, priority, scheduled.toISOString()]
+    );
+    return result.rows[0];
+  } catch (err) {
+    if (err.code !== '23505') throw err;
+    const again = await db.query(
+      `SELECT * FROM call_queue
+       WHERE tenant_id = $1 AND lead_id = $2 AND status = ANY($3::text[])
+       ORDER BY created_at DESC LIMIT 1`,
+      [tenantId, leadId, OPEN_STATUSES]
+    );
+    if (again.rows[0]) return again.rows[0];
+    throw err;
+  }
 }
 
 /**
@@ -94,7 +149,6 @@ async function updateQueueStatus(queueId, status, extra = {}) {
          call_id           = COALESCE($2, call_id),
          failure_reason    = COALESCE($3, failure_reason),
          last_attempt_at   = CASE WHEN $1 IN ('calling', 'processing') THEN NOW() ELSE last_attempt_at END,
-         attempt_count     = CASE WHEN $1 = 'calling' THEN attempt_count + 1 ELSE attempt_count END,
          updated_at        = NOW()
      WHERE id = $4`,
     [status, callId || null, failureReason || null, queueId]
@@ -123,16 +177,19 @@ async function scheduleRetry(queueId, delayMinutes = DEFAULT_RETRY_DELAY_MINUTES
  */
 async function canAttemptLead(leadId) {
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  today.setUTCHours(0, 0, 0, 0);
   const result = await db.query(
-    `SELECT COUNT(*) AS count FROM call_queue
-     WHERE lead_id = $1
-       AND last_attempt_at >= $2
-       AND status NOT IN ('queued', 'cancelled', 'retry_scheduled')`,
+    `SELECT
+       (SELECT COUNT(*) FROM calls WHERE lead_id = $1 AND created_at >= $2) AS calls,
+       (SELECT COUNT(*) FROM call_queue
+         WHERE lead_id = $1
+           AND last_attempt_at >= $2
+           AND status NOT IN ('queued', 'cancelled', 'retry_scheduled')) AS jobs`,
     [leadId, today.toISOString()]
   );
-  const count = parseInt(result.rows[0]?.count || '0', 10);
-  return count < MAX_ATTEMPTS_PER_DAY;
+  const calls = parseInt(result.rows[0]?.calls || '0', 10);
+  const jobs = parseInt(result.rows[0]?.jobs || '0', 10);
+  return Math.max(calls, jobs) < MAX_ATTEMPTS_PER_DAY;
 }
 
 /**
@@ -156,6 +213,7 @@ module.exports = {
   scheduleRetry,
   canAttemptLead,
   cancelLeadCalls,
+  callConsentDecision,
   MAX_CONCURRENT_CALLS,
   MAX_ATTEMPTS_PER_DAY,
 };

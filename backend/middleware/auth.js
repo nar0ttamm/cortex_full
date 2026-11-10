@@ -159,6 +159,7 @@ function isPublicPath(path) {
     '/v1/meta/webhook',
     '/v1/meta/callback',
     '/v1/google-calendar/callback',
+    '/v1/msg91/webhook',
   ];
   return publicPrefixes.some((p) => path === p || path.startsWith(p));
 }

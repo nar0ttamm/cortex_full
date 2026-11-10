@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth';
 import {
   getLeadsFromSupabase,
   getLeadFromSupabase,
+  getLeadStatuses,
   createLeadInSupabase,
   updateLeadInSupabase,
 } from '@/lib/supabase-client';
@@ -17,6 +18,11 @@ export async function GET(request: NextRequest) {
     if (action === 'leads') {
       const leads = await getLeadsFromSupabase(tenantId);
       return NextResponse.json({ leads });
+    }
+
+    if (action === 'lead-statuses') {
+      const statuses = await getLeadStatuses(tenantId);
+      return NextResponse.json({ statuses });
     }
 
     if (action === 'lead') {

@@ -356,9 +356,9 @@ router.post('/calls/result', requireVoiceSecret, asyncHandler(async (req, res) =
         try {
           await db.query(
             `UPDATE call_queue SET status = 'completed', updated_at = NOW()
-             WHERE (call_id = $1 OR lead_id = $2) AND tenant_id = $3
-               AND status NOT IN ('cancelled', 'completed')`,
-            [call_id, lead_id, tenant_id]
+             WHERE call_id = $1 AND tenant_id = $2
+               AND status IN ('calling', 'processing')`,
+            [call_id, tenant_id]
           );
         } catch { /* non-critical */ }
       }

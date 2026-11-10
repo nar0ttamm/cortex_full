@@ -1,5 +1,6 @@
 const { Router } = require('express');
 const asyncHandler = require('../utils/asyncHandler');
+const db = require('../db');
 const { processWebhookPayload, verifyWebhookSecret } = require('../integrations/webhookHandler');
 const {
   SUPPORTED_INTEGRATIONS,
@@ -43,19 +44,26 @@ router.post('/webhook/:tenantId/:integrationKey', asyncHandler(async (req, res) 
 // GET /v1/webhook/:tenantId/:integrationKey/verify
 // Webhook verification (Meta, Google, Typeform challenge-response)
 router.get('/webhook/:tenantId/:integrationKey', asyncHandler(async (req, res) => {
-  const { mode, challenge, 'hub.mode': hubMode, 'hub.challenge': hubChallenge } = req.query;
+  const { tenantId, integrationKey } = req.params;
+  const hubMode = req.query['hub.mode'];
+  const hubChallenge = req.query['hub.challenge'];
+  const verifyToken = req.query['hub.verify_token'] || req.query.token;
 
-  // Meta Lead Ads verification
-  if (hubMode === 'subscribe' && hubChallenge) {
-    return res.send(hubChallenge);
+  if ((hubMode === 'subscribe' && hubChallenge) || req.query.challenge) {
+    const result = await db.query(
+      `SELECT webhook_secret FROM integrations
+       WHERE tenant_id = $1 AND integration_key = $2 AND status = 'active'`,
+      [tenantId, integrationKey]
+    );
+    const secret = result.rows[0]?.webhook_secret;
+    const { timingSafeEqualText } = require('../services/comms/webhookAuth');
+    if (!secret || !timingSafeEqualText(verifyToken, secret)) {
+      return res.status(403).json({ error: 'Invalid verify token' });
+    }
+    return res.send(String(hubChallenge || req.query.challenge));
   }
 
-  // Generic challenge-response
-  if (challenge) {
-    return res.send(challenge);
-  }
-
-  return res.json({ status: 'active', message: 'Webhook endpoint ready' });
+  return res.json({ status: 'active' });
 }));
 
 // ─── Integration Management (CRM API) ────────────────────────────────────────

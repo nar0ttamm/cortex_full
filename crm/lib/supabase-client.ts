@@ -97,6 +97,11 @@ export async function createLeadInSupabase(
   });
 }
 
+export async function getLeadStatuses(tenantId: string) {
+  const data = await fetchApi('/v1/tenant/' + tenantId + '/lead-statuses');
+  return data.statuses || [];
+}
+
 export async function updateLeadInSupabase(
   leadId: string,
   updates: { status?: string; metadata?: Record<string, unknown>; [k: string]: unknown }

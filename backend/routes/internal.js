@@ -19,7 +19,9 @@ const {
   scheduleRetry,
   canAttemptLead,
   MAX_CONCURRENT_CALLS,
+  MAX_ATTEMPTS_PER_DAY,
 } = require('../services/callQueueService');
+const { classifyDialError, nextQueueStatus, retryDelayMinutes } = require('../services/queuePolicy');
 const { requireCronSecret } = require('../middleware/auth');
 const { startOutboundCall, StartCallError } = require('../services/startOutboundCall');
 
@@ -42,7 +44,7 @@ async function migrateLegacyScheduledLeads() {
        AND NOT EXISTS (
          SELECT 1 FROM call_queue q
          WHERE q.lead_id = l.id
-           AND q.status IN ('queued', 'retry_scheduled', 'processing', 'calling')
+           AND q.status <> 'cancelled'
        )`
   ).catch((err) => console.warn('[queue-worker] legacy migrate skipped:', err.message));
 }
@@ -56,11 +58,28 @@ async function migrateLegacyScheduledLeads() {
  *
  * Retry eligibility: controlled by canAttemptLead (max 2 per day).
  */
+async function recoverStaleProcessing() {
+  await db.query(
+    `UPDATE call_queue
+     SET status = CASE WHEN attempt_count >= $1 THEN 'max_attempts_reached' ELSE 'retry_scheduled' END,
+         scheduled_at = CASE WHEN attempt_count >= $1 THEN scheduled_at ELSE NOW() + INTERVAL '15 minutes' END,
+         failure_reason = 'stale processing lease expired',
+         updated_at = NOW()
+     WHERE status = 'processing'
+       AND lease_expires_at IS NOT NULL
+       AND lease_expires_at < NOW()`
+  ).catch((err) => console.warn('[queue-worker] stale recovery skipped:', err.message));
+}
+
 async function runQueueWorker() {
+  if (process.env.CALL_QUEUE_ENABLED !== 'true') {
+    return { skipped: true, reason: 'CALL_QUEUE_ENABLED is not true. Automatic dialing stays off until an operator enables it.' };
+  }
   if (!config.voiceServiceUrl) {
     return { skipped: true, reason: 'VOICE_SERVICE_URL not configured' };
   }
 
+  await recoverStaleProcessing();
   await migrateLegacyScheduledLeads();
 
   const active = await getActiveCalls();
@@ -96,8 +115,15 @@ async function runQueueWorker() {
     try {
       await client.query('BEGIN');
       const locked = await client.query(
-        `SELECT id FROM call_queue WHERE id = $1 AND status IN ('queued','retry_scheduled')
-         FOR UPDATE SKIP LOCKED`,
+        `UPDATE call_queue
+         SET status = 'processing',
+             claimed_at = NOW(),
+             lease_expires_at = NOW() + INTERVAL '5 minutes',
+             attempt_count = attempt_count + 1,
+             last_attempt_at = NOW(),
+             updated_at = NOW()
+         WHERE id = $1 AND status IN ('queued','retry_scheduled')
+         RETURNING attempt_count`,
         [job.id]
       );
       if (locked.rows.length === 0) {
@@ -105,13 +131,8 @@ async function runQueueWorker() {
         skipped++;
         continue; // Another worker already grabbed this row
       }
-
-      // Mark as processing immediately so capacity is respected
-      await client.query(
-        `UPDATE call_queue SET status = 'processing', updated_at = NOW() WHERE id = $1`,
-        [job.id]
-      );
       await client.query('COMMIT');
+      job.claimed_attempts = locked.rows[0].attempt_count;
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       errors.push(`lock failed for ${job.id}: ${err.message}`);
@@ -132,17 +153,21 @@ async function runQueueWorker() {
       } catch (err) {
         const message = err instanceof StartCallError ? err.message : err.message;
         errors.push(`job ${job.id}: ${message}`);
-        if (err instanceof StartCallError && err.status === 409) {
-          skipped++;
-          continue;
-        }
-        const RETRIABLE = ['ECONNREFUSED', 'timeout', 'fetch failed', 'ETIMEDOUT', 'Voice service timeout'];
-        const isRetriable = RETRIABLE.some((e) => String(message).toLowerCase().includes(e.toLowerCase()));
-        if (isRetriable) {
-          await scheduleRetry(job.id, 30);
+        const classified = classifyDialError({
+          status: err instanceof StartCallError ? err.status : 0,
+          message,
+        });
+        const next = nextQueueStatus({
+          attemptCount: job.claimed_attempts || 1,
+          maxAttempts: MAX_ATTEMPTS_PER_DAY,
+          retriable: classified.retriable,
+        });
+        if (next === 'retry_scheduled') {
+          await scheduleRetry(job.id, retryDelayMinutes(job.claimed_attempts || 1));
         } else {
-          await updateQueueStatus(job.id, 'failed', { failureReason: message });
+          await updateQueueStatus(job.id, next, { failureReason: message });
         }
+        if (err instanceof StartCallError && err.status === 409) skipped++;
       }
     } catch (err) {
       errors.push(`job ${job.id}: ${err.message}`);

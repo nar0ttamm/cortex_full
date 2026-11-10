@@ -17,6 +17,7 @@ const { Router } = require('express');
 const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const config = require('../config');
+const { verifyMetaSignature } = require('../services/comms/webhookAuth');
 
 const router = Router();
 
@@ -152,6 +153,9 @@ router.get('/meta/webhook', (req, res) => {
 
 // POST /v1/meta/webhook — Receive leadgen events
 router.post('/meta/webhook', asyncHandler(async (req, res) => {
+  const valid = verifyMetaSignature(req.rawBody, req.headers['x-hub-signature-256'], config.metaAppSecret);
+  if (!valid) return res.sendStatus(403);
+
   res.sendStatus(200); // Respond immediately
 
   const body = req.body;
