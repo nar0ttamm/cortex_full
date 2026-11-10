@@ -13,6 +13,7 @@ const SUPPORTED_INTEGRATIONS = [
   { key: 'indiamart', label: 'IndiaMART', type: 'webhook', icon: 'indiamart' },
   { key: 'justdial', label: 'Justdial', type: 'webhook', icon: 'justdial' },
   { key: 'zapier', label: 'Zapier', type: 'webhook', icon: 'zapier' },
+  { key: 'make', label: 'Make', type: 'webhook', icon: 'zapier' },
   { key: 'typeform', label: 'Typeform', type: 'webhook', icon: 'typeform' },
   { key: 'tally', label: 'Tally Forms', type: 'webhook', icon: 'tally' },
   { key: 'generic', label: 'Generic Webhook', type: 'webhook', icon: 'webhook' },

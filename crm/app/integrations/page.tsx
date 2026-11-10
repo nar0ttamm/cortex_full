@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AppShell } from '../components/AppShell';
+import { NativeConnections } from '../components/NativeConnections';
 
 import { useTenantId } from '@/app/hooks/useTenantId';
 import { getBackendAuthHeaders } from '@/lib/backendAuth';
@@ -158,6 +159,12 @@ export default function IntegrationsPage() {
 
   useEffect(() => {
     void fetchData();
+    const params = new URLSearchParams(window.location.search);
+    const success = params.get('success');
+    const error = params.get('error');
+    if (success === 'google_calendar_connected') setBanner({ type: 'success', text: 'Google Calendar connected. Choose the business calendar below.' });
+    if (success === 'meta_connected') setBanner({ type: 'success', text: 'Meta account connected. Load Pages, then choose the lead forms to accept.' });
+    if (error) setBanner({ type: 'error', text: `Connection was not completed (${error}).` });
   }, [tenantId]);
 
   const connect = async (key: string, label: string) => {
@@ -281,6 +288,8 @@ export default function IntegrationsPage() {
             </div>
           </div>
         )}
+
+        {tenantId && <NativeConnections tenantId={tenantId} />}
 
         {/* Page header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

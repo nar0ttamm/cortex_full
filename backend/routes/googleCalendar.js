@@ -196,6 +196,34 @@ router.get('/google-calendar/status', asyncHandler(async (req, res) => {
   return res.json({ connected: true, ...result.rows[0] });
 }));
 
+router.get('/google-calendar/calendars', asyncHandler(async (req, res) => {
+  const tokenData = await getValidToken(req.tenantId);
+  if (!tokenData?.access_token) return res.status(404).json({ error: 'Google Calendar is not connected' });
+  const listRes = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+    headers: { Authorization: `Bearer ${tokenData.access_token}` },
+  });
+  const body = await listRes.json();
+  if (!listRes.ok) return res.status(502).json({ error: body.error?.message || 'Google did not return calendars' });
+  return res.json({
+    calendars: (body.items || []).map((item) => ({
+      id: item.id,
+      summary: item.summary,
+      primary: Boolean(item.primary),
+    })),
+  });
+}));
+
+router.post('/google-calendar/calendar', asyncHandler(async (req, res) => {
+  const calendarId = String(req.body?.calendarId || '').trim();
+  if (!req.tenantId || !calendarId) return res.status(400).json({ error: 'calendarId is required' });
+  const updated = await db.query(
+    `UPDATE google_calendar_tokens SET calendar_id = $1, updated_at = now() WHERE tenant_id = $2 RETURNING calendar_id`,
+    [calendarId, req.tenantId]
+  );
+  if (!updated.rows.length) return res.status(404).json({ error: 'Google Calendar is not connected' });
+  return res.json({ calendar_id: updated.rows[0].calendar_id });
+}));
+
 // POST /v1/google-calendar/create-event
 router.post('/google-calendar/create-event', asyncHandler(async (req, res) => {
   const tenantId = req.tenantId;
