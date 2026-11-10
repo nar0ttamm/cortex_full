@@ -10,7 +10,15 @@ Verified from the Vercel team connected to this workspace and from files in the 
 | CRM | `crm` (`prj_dgHgalBUktWIkwfcWTw6hvIg8U81`) | `crm.cortexflow.in` verified. Also `crm-sage-xi.vercel.app` | `nar0ttamm/cortex_full` branch `main` |
 | API | `cortex-backend-api` (`prj_Q2xTgjUScHCbI6sGPMzDYc9aB5gg`) | `cortex-backend-api.vercel.app` | Same repo and branch |
 
-Newest READY production deployment of CRM and API at audit time: commit `cc15cd7b6d3b997380a4d7cb34b0979013ce47da`, message "Turn CortexFlow into a conversion engine with project-aware calling."
+Production deployment on 10 November 2026, triggered by the GitHub push to `main` (no separate Vercel CLI deploy):
+
+| Project | Deployment | Commit | Production alias |
+|---|---|---|---|
+| `cortex-backend-api` | `dpl_HxGCSnnAFAQXsV8kwSfgPMc7ELzc` | `f7a634cc3808cdf3c7387482f4b32bed839da2ae` | `cortex-backend-api.vercel.app` |
+| `crm` | `dpl_EjrRe9TT8N1SEjc5kFF5rLNbKKSM` | same commit | `crm.cortexflow.in` |
+| `landing` | `dpl_3YSLap5mzQsmnbDhxGpxLDrTcTD5` | same commit | `www.cortexflow.in` |
+
+`GET /health` on that API deployment returned `database: connected`, `commit` equal to that SHA, `automatic_calling: disabled`, and `demo_calls: disabled`. `CALL_QUEUE_ENABLED` and `DEMO_CALLS_ENABLED` are not set on the backend project. `DATABASE_SSL_REJECT_UNAUTHORIZED` is not set. Postgres TLS uses `backend/certs/prod-ca-2021.crt` with certificate verification on. MSG91 keys are not set, so the new adapters cannot send. The GCP voice VM was not changed.
 
 There is no `vercel.json` in `crm/` or `landing/`. API config is `backend/vercel.json`: one Node build of `server.js`, and two crons at `0 0 * * *`.
 
@@ -28,7 +36,7 @@ Region `asia-south1` and machine type `e2-medium` appear in `DOCS/COST_FORECAST.
 
 `DATABASE_URL`, `ENCRYPTION_KEY`, `ADMIN_TOKEN`, `ADMIN_EMAIL`, `ADMIN_PHONE`, `BACKEND_URL`, `CALLING_MODE`, `CALL_DELAY_SECONDS`, `DEFAULT_TENANT_ID`, `OPENAI_API_KEY`, `VOICE_SECRET`, `VOICE_SERVICE_URL`, `CRON_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CRM_URL`, `META_WEBHOOK_VERIFY_TOKEN`, `GOOGLE_REDIRECT_URI`.
 
-Not in that list, though the code reads them if present: `SUPABASE_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `META_APP_ID`, `META_APP_SECRET`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `AISENSY_API_KEY`, `AISENSY_CAMPAIGNS`, `MAX_CONCURRENT_CALLS`, `OPENAI_MODEL`, `PORT`.
+Not in that list, though the code reads them if present: `SUPABASE_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `META_APP_ID`, `META_APP_SECRET`, `MSG91_AUTH_KEY`, `MSG91_EMAIL_FROM`, `MSG91_WHATSAPP_NUMBER`, `MSG91_WEBHOOK_SECRET`, `CALL_QUEUE_ENABLED`, `DEMO_CALLS_ENABLED`, `DATABASE_SSL_REJECT_UNAUTHORIZED`, `MAX_CONCURRENT_CALLS`, `OPENAI_MODEL`, `PORT`. Leave the two call flags unset. Anything other than the exact string `true` keeps automatic dialing and demo calls off.
 
 ### CRM project `crm`
 
