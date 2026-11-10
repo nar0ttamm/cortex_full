@@ -10,15 +10,7 @@ Verified from the Vercel team connected to this workspace and from files in the 
 | CRM | `crm` (`prj_dgHgalBUktWIkwfcWTw6hvIg8U81`) | `crm.cortexflow.in` verified. Also `crm-sage-xi.vercel.app` | `nar0ttamm/cortex_full` branch `main` |
 | API | `cortex-backend-api` (`prj_Q2xTgjUScHCbI6sGPMzDYc9aB5gg`) | `cortex-backend-api.vercel.app` | Same repo and branch |
 
-Production deployment on 10 November 2026, triggered by the GitHub push to `main` (no separate Vercel CLI deploy):
-
-| Project | Deployment | Commit | Production alias |
-|---|---|---|---|
-| `cortex-backend-api` | `dpl_HxGCSnnAFAQXsV8kwSfgPMc7ELzc` | `f7a634cc3808cdf3c7387482f4b32bed839da2ae` | `cortex-backend-api.vercel.app` |
-| `crm` | `dpl_EjrRe9TT8N1SEjc5kFF5rLNbKKSM` | same commit | `crm.cortexflow.in` |
-| `landing` | `dpl_3YSLap5mzQsmnbDhxGpxLDrTcTD5` | same commit | `www.cortexflow.in` |
-
-`GET /health` on that API deployment returned `database: connected`, `commit` equal to that SHA, `automatic_calling: disabled`, and `demo_calls: disabled`. `CALL_QUEUE_ENABLED` and `DEMO_CALLS_ENABLED` are not set on the backend project. `DATABASE_SSL_REJECT_UNAUTHORIZED` is not set. Postgres TLS uses `backend/certs/prod-ca-2021.crt` with certificate verification on. MSG91 keys are not set, so the new adapters cannot send. The GCP voice VM was not changed.
+A push to `main` auto-deploys all three projects. The queue-safe runtime is commit `f7a634cc3808cdf3c7387482f4b32bed839da2ae`. Confirm the live API with `GET https://cortex-backend-api.vercel.app/health`: `database` is `connected`, `commit` matches `origin/main`, `automatic_calling` is `disabled`, and `demo_calls` is `disabled`. That check passed on 10 November 2026 for `f7a634cc3808cdf3c7387482f4b32bed839da2ae` at `cortex-backend-api.vercel.app`, `crm.cortexflow.in`, and `www.cortexflow.in`. `CALL_QUEUE_ENABLED` and `DEMO_CALLS_ENABLED` are not set on the backend project. `DATABASE_SSL_REJECT_UNAUTHORIZED` is not set. Postgres TLS uses `backend/certs/prod-ca-2021.crt` with certificate verification on. MSG91 keys are not set, so the new adapters cannot send. The GCP voice VM was not changed.
 
 There is no `vercel.json` in `crm/` or `landing/`. API config is `backend/vercel.json`: one Node build of `server.js`, and two crons at `0 0 * * *`.
 
